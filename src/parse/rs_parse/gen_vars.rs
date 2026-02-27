@@ -1,39 +1,57 @@
-use syn::{Ident, Token, parse::ParseStream, spanned::Spanned};
 use std::fmt::Debug;
+use syn::{
+    Ident, Token,
+    parse::{ParseBuffer, ParseStream},
+    spanned::Spanned,
+};
 
-use super::parse_to;
+use crate::parse::ScriptData;
+
+#[derive(Clone)]
+pub struct Prop {
+    pub name: String,
+    pub ty: syn::Type,
+    default: Option<syn::Expr>,
+    pub flag_pos: u8,
+}
+
+impl Debug for Prop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Prop {{ name: {}, ty: {}, default: {:?}, flag_pos: {} }}",
+            self.name,
+            quote::ToTokens::to_token_stream(&self.ty).to_string(),
+            self.default
+                .as_ref()
+                .map(|d| quote::ToTokens::to_token_stream(d).to_string()),
+            self.flag_pos
+        )
+    }
+}
 
 #[derive(Clone)]
 pub struct StateVar {
     pub name: Ident,
     pub ty: syn::Type,
     pub default: syn::Expr,
-    mutable: bool,
+    pub flag_pos: u8,
 }
 
 impl Debug for StateVar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "StateVar {{ name: {}, ty: {}, default: {}, mutable: {} }}",
+            "StateVar {{ name: {}, ty: {}, default: {}, flag_pos: {} }}",
             self.name,
             quote::ToTokens::to_token_stream(&self.ty).to_string(),
             quote::ToTokens::to_token_stream(&self.default).to_string(),
-            self.mutable
+            self.flag_pos
         )
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ReactiveVar {
-    pub var: StateVar,
-    pub flag_pos: u8,
-}
-
-/// Parse variable declarations from the input stream
-pub fn gen_vars(input: &mut ParseStream, reactive_vars: &mut Vec<ReactiveVar>, non_reactive_vars: &mut Vec<StateVar>) -> syn::Result<()> {
-    // Parse variable declaration
-    let mutable = input.parse::<Token![mut]>().is_ok();
+fn parse_var(input: &mut ParseBuffer, script_data: &mut ScriptData, flag_pos: &mut u8) -> syn::Result<()> {
     let name: Ident = input.parse()?;
 
     let mut ty = None;
@@ -43,83 +61,121 @@ pub fn gen_vars(input: &mut ParseStream, reactive_vars: &mut Vec<ReactiveVar>, n
     }
 
     input.parse::<Token![=]>()?;
-    if input.peek(Token![$]) {
-        // Reactive variable
-        input.parse::<Token![$]>()?;
-        let state_ident: Ident = input.parse()?;
-        if state_ident != "state" {
-            return Err(syn::Error::new(
-                state_ident.span(),
-                "Expected 'state' after '$'",
-            ));
-        }
+    input.parse::<Token![$]>()?;
 
-        if !mutable {
-            return Err(syn::Error::new(
-                name.span(),
-                "Reactive state variables must be mutable",
-            ));
-        }
+    let var_type_ident: Ident = input.parse()?;
 
-        let content;
-        syn::parenthesized!(content in input);
+    let paren_content;
+    syn::parenthesized!(paren_content in input);
 
-        let mut default_expr: syn::Expr = content.parse()?;
-        let ty = if let Some(ty) = ty {
-            ty
+    let mut default_expr = None;
+    if !paren_content.is_empty() {
+        let paren_content: syn::Expr = paren_content.parse()?;
+
+        let inferred_ty = infer_type_from_expr(&paren_content).ok_or(syn::Error::new(
+            paren_content.span(),
+            "Could not infer type for reactive state variable; please specify type explicitly",
+        ))?;
+        ty = Some(inferred_ty.clone());
+
+        if ("String" == quote::quote! { #inferred_ty }.to_string())
+            && !matches!(paren_content, syn::Expr::Lit(_))
+        {
+            // Wrap in to_string() call
+            default_expr = Some(syn::parse2(quote::quote! {
+                #paren_content.to_string()
+            })?);
         } else {
-            // Infer type from default expression
-            ty = infer_type_from_expr(&default_expr);
-            if let Some(inferred_ty) = ty {
-                if ("String" == quote::quote! { #inferred_ty }.to_string())
-                    && !matches!(default_expr, syn::Expr::Lit(_))
-                {
-                    // Wrap in to_string() call
-                    default_expr = syn::parse2(quote::quote! {
-                        #default_expr.to_string()
-                    })
-                    .unwrap();
-                }
-                inferred_ty
-            } else {
-                return Err(syn::Error::new(
-                    default_expr.span(),
-                    "Could not infer type for reactive state variable; please specify type explicitly",
-                ));
-            }
-        };
-
-        let state_var = StateVar {
-            name: name.clone(),
-            ty,
-            default: default_expr,
-            mutable,
-        };
-
-        let flag_pos = reactive_vars.len() as u8;
-        let reactive_var = ReactiveVar {
-            var: state_var,
-            flag_pos,
-        };
-        reactive_vars.push(reactive_var);
-    } else {
-        // Non-reactive variable
-        let default_expr: syn::Expr = input.parse()?;
-        if let None = ty {
-            // Infer type from default expression
-            ty = infer_type_from_expr(&default_expr);
+            default_expr = Some(paren_content);
         }
-
-        let state_var = StateVar {
-            name: name.clone(),
-            ty: ty.unwrap_or_else(|| syn::parse_str("_").unwrap()),
-            default: default_expr,
-            mutable,
-        };
-
-        non_reactive_vars.push(state_var);
     }
-    let _ = parse_to(input, Token![;], true)?;
+
+    let ty = ty.ok_or(syn::Error::new(
+        name.span(),
+        "Type annotation is required if no default value is provided",
+    ))?;
+
+    let expr_as_res = |e: Option<syn::Expr>| {
+        e.ok_or(syn::Error::new(
+            name.span(),
+            "Default value is required for reactive state variables",
+        ))
+    };
+
+    match var_type_ident.to_string().as_str() {
+        "prop" => {
+            let prop = Prop {
+                name: name.to_string(),
+                ty: ty,
+                default: default_expr,
+                flag_pos: *flag_pos,
+            };
+            script_data.props.push(prop);
+        }
+        "bindable" => {
+            let prop = Prop {
+                name: name.to_string(),
+                ty: ty,
+                default: default_expr,
+                flag_pos: *flag_pos,
+            };
+            script_data.bindable_props.push(prop);
+        }
+        "state" => {
+            let state_var = StateVar {
+                name: name.clone(),
+                ty: ty,
+                default: expr_as_res(default_expr)?,
+                flag_pos: *flag_pos,
+            };
+            script_data.derived_vars.push(state_var);
+        }
+        "derived" => {
+            let state_var = StateVar {
+                name: name.clone(),
+                ty: ty,
+                default: expr_as_res(default_expr)?,
+                flag_pos: *flag_pos,
+            };
+            script_data.state_vars.push(state_var);
+        }
+        _ => {
+            return Err(syn::Error::new(
+                var_type_ident.span(),
+                "Expected 'prop' or 'bindable' after '$'",
+            ));
+        }
+    }
+
+    // Consume comma if present
+    input.parse::<Token![,]>().ok();
+
+    *flag_pos += 1;
+
+    Ok(())
+}
+
+/// Parse variable declarations from the input stream
+pub fn gen_vars(input: &mut ParseStream, script_data: &mut ScriptData) -> syn::Result<()> {
+    input.parse::<Token![struct]>()?; // Consume 'struct'
+    input.parse::<Token![$]>()?; // Consume '$'
+
+    // consume 'state' identifier
+    let state_ident: Ident = input.parse()?;
+    if state_ident != "state" {
+        return Err(syn::Error::new(
+            state_ident.span(),
+            "Expected 'state' after '$'",
+        ));
+    }
+
+    let mut content;
+    syn::braced!(content in input);
+
+    let mut flag_pos = 0;
+    while !content.is_empty() {
+        parse_var(&mut content, script_data, &mut flag_pos)?;
+    }
 
     Ok(())
 }

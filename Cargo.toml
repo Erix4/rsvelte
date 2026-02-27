@@ -12,6 +12,7 @@ log = "0.4.29"
 proc-macro2 = "1.0.103"
 quote = "1.0.42"
 syn = { version = "2.0.111", features = ["full", "visit", "visit-mut"] }
+tempdir = "0.3.7"
 web-sys = { version = "0.3.83", features = ["Event"] }
 
 [dev-dependencies]

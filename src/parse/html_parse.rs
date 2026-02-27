@@ -2,28 +2,42 @@ use std::fmt::Debug;
 
 use crate::{EVENTS, parse::rs_parse, utils::*};
 
+pub struct IfBranch {
+    pub condition: syn::Expr,
+    pub contents: Vec<Element>,
+}
+
 pub enum ContentType {
-    Text(String, Vec<syn::Expr>),
-    Elem(Vec<Element>),
-    None,
+    Text(String),
+    Expr(syn::Expr),
+    Tag(Tag, Vec<Element>),                  // tag and its contents
+    If(Vec<IfBranch>, Option<Vec<Element>>), // if branches, else branch
+    Each(syn::Expr, String, Vec<Element>),   // iterable expression, item name, contents
 }
 
 impl Debug for ContentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ContentType::Text(text, exprs) => {
-                let expr_strs = exprs
+            ContentType::Text(text) => write!(f, "Text({:?})", text),
+            ContentType::Expr(_) => write!(f, "Expr(?)"),
+            ContentType::Tag(tag, contents) => {
+                write!(f, "Tag {{ {:?}, contents: {:?} }}", tag, contents)
+            }
+            ContentType::If(if_branches, else_branch) => {
+                let if_str = if_branches
                     .iter()
-                    .map(|e| quote::ToTokens::to_token_stream(e).to_string())
+                    .map(|branch| format!("if (?) {{ {:?} }}", branch.contents))
                     .collect::<Vec<_>>()
-                    .join(", ");
-                write!(f, "Text({}, `{}`)", text, expr_strs)
+                    .join(" else ");
+                let else_str = if let Some(else_contents) = else_branch {
+                    format!(" else {{ {:?} }}", else_contents)
+                } else {
+                    String::new()
+                };
+                write!(f, "If {{ {}{} }}", if_str, else_str)
             }
-            ContentType::Elem(elems) => {
-                write!(f, "Elem({:?})", elems)
-            }
-            ContentType::None => {
-                write!(f, "None")
+            ContentType::Each(_, item_name, contents) => {
+                write!(f, "Each {{ for {} in ? {{ {:?} }} }}", item_name, contents)
             }
         }
     }
@@ -31,46 +45,65 @@ impl Debug for ContentType {
 
 #[derive(Debug)]
 pub struct Element {
-    pub tag: Tag,
     pub id: u32,
-    pub contents: ContentType,
+    pub content: ContentType,
 }
 
 impl Element {
-    pub fn get_events(&self) -> Vec<(u32, &String, &AttrType)> {
+    pub fn get_events(&self) -> Vec<(String, AttrType)> {
         let all_attrs = self.get_all_attrs();
+        // Filter to only event attributes, and check that they are not strings
         all_attrs
             .iter()
-            .filter(|(_, name, _)| {
+            .filter(|(name, _)| {
                 crate::EVENTS
                     .iter()
                     .any(|(event_name, _, _)| event_name == name)
             })
-            .map(|(id, name, attr)| {
+            .map(|(name, attr)| {
                 if let AttrType::Str(_) = attr {
                     panic!(
                         "Event attribute '{}' must be a function call or closure, found string",
                         name
                     );
                 }
-                (*id, *name, *attr)
+                (name.clone(), attr.clone())
             })
             .collect()
     }
 
-    fn get_all_attrs(&self) -> Vec<(u32, &String, &AttrType)> {
-        let mut attrs = self
-            .tag
-            .attributes
-            .iter()
-            .map(|(name, attr)| (self.id, name, attr))
-            .collect::<Vec<_>>();
-        if let ContentType::Elem(children) = &self.contents {
-            for child in children {
-                attrs.extend(child.get_all_attrs());
+    fn get_all_attrs(&self) -> Vec<(String, AttrType)> {
+        match &self.content {
+            ContentType::Tag(tag, contents) => {
+                let mut attrs = tag.attributes.clone();
+                for child in contents {
+                    attrs.extend(child.get_all_attrs());
+                }
+                attrs
             }
+            ContentType::If(if_branches, else_branch) => {
+                let mut attrs = Vec::new();
+                for branch in if_branches {
+                    for elem in &branch.contents {
+                        attrs.extend(elem.get_all_attrs());
+                    }
+                }
+                if let Some(else_contents) = else_branch {
+                    for elem in else_contents {
+                        attrs.extend(elem.get_all_attrs());
+                    }
+                }
+                attrs
+            }
+            ContentType::Each(_, _, contents) => {
+                let mut attrs = Vec::new();
+                for elem in contents {
+                    attrs.extend(elem.get_all_attrs());
+                }
+                attrs
+            }
+            _ => Vec::new(),
         }
-        attrs
     }
 }
 
@@ -83,78 +116,149 @@ pub fn read_element_with_tag(
     let id = *id_counter;
     *id_counter += 1;
 
-    let contents = if !tag.self_closing {
-        read_until(chars, |ch| !ch.is_whitespace(), coord);
-
-        if let Some(&ch) = chars.peek() {
-            if ch == '<' {
-                let mut child_elems = Vec::new();
-                while let Some(&ch) = chars.peek() {
-                    if ch != '<' {
-                        panic!(
-                            "Expected '<' at line {}, col {}, found '{}'",
-                            coord.line, coord.col, ch
-                        );
-                    }
-                    let next_tag = read_tag(chars, coord);
-                    match next_tag {
-                        TagType::Opening(next_tag) => {
-                            let child_elem =
-                                read_element_with_tag(chars, coord, id_counter, next_tag);
-                            child_elems.push(child_elem);
-                        }
-                        TagType::Closing(name) => {
-                            if name == tag.name {
-                                break;
-                            } else {
-                                panic!(
-                                    "Mismatched closing tag </{}> at line {}, col {}, expected </{}>",
-                                    name, coord.line, coord.col, tag.name
-                                );
-                            }
-                        }
-                    }
-                    read_until(chars, |ch| !ch.is_whitespace(), coord);
-                }
-                ContentType::Elem(child_elems)
-            } else {
-                let text = read_until(chars, |c| c == '<', coord);
-
-                // Detect reactive expressions in text nodes
-                let mut exprs = Vec::new();
-                let mut processed_text = String::new();
-                let mut text_chars = text.chars().peekable();
-                while let Some(ch) = text_chars.next() {
-                    if ch == '{' {
-                        let expr_content = read_until(&mut text_chars, |c| c == '}', coord);
-                        expect_next(&mut text_chars, '}', coord);
-                        exprs.push(syn::parse_str::<syn::Expr>(&expr_content).unwrap());
-                        processed_text.push_str("{}"); // Placeholder for expression
-                    } else {
-                        processed_text.push(ch);
-                    }
-                }
-
-                read_closing_tag(chars, coord, &tag.name);
-                ContentType::Text(processed_text, exprs)
-            }
-        } else {
-            panic!(
-                "Unexpected end of input while reading contents at line {}, col {}",
-                coord.line, coord.col
-            );
-        }
+    let contents = if tag.self_closing {
+        Vec::new()
     } else {
-        ContentType::None
+        let (contents, exit_reason) = read_contents(chars, coord, id_counter);
+        assert!(
+            matches!(exit_reason, ReadContentExitReason::ClosingTag(ref name) if name == &tag.name)
+        );
+        contents
     };
 
     let elem_out = Element {
-        tag: tag,
         id,
-        contents: contents,
+        content: ContentType::Tag(tag, contents),
     };
 
     elem_out
+}
+
+enum ReadContentExitReason {
+    ClosingTag(String), // Found a closing tag, with the tag name
+    ElseIf(syn::Expr),  // Found an else if branch, with the condition expression
+    Else,               // Found an else branch
+    IfClose,            // Found the closing tag for an if block
+    EachClose,          // Found the closing tag for an each block
+    End,                // Reached the end of input
+}
+
+fn read_contents(
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+    coord: &mut Coord,
+    id_counter: &mut u32,
+) -> (Vec<Element>, ReadContentExitReason) {
+    let id = *id_counter;
+    *id_counter += 1;
+
+    let mut elems = Vec::new();
+
+    while let Some(&ch) = chars.peek() {
+        match ch {
+            '<' => {
+                let next_tag = read_tag(chars, coord);
+                match next_tag {
+                    TagType::Opening(next_tag) => {
+                        let elem = read_element_with_tag(chars, coord, id_counter, next_tag);
+                        elems.push(elem);
+                    }
+                    TagType::Closing(name) => {
+                        return (elems, ReadContentExitReason::ClosingTag(name));
+                    }
+                }
+                read_until(chars, |ch| !ch.is_whitespace(), coord);
+            }
+            '{' => {
+                chars.next();
+                update_coord('{', coord);
+                let expr_content = read_attr_expression(chars, coord);
+                expect_next(chars, '}', coord);
+
+                if expr_content.starts_with("#if") {
+                    let condition_str = expr_content.trim_start_matches("#if").trim();
+                    let condition = syn::parse_str::<syn::Expr>(condition_str).unwrap();
+                    let mut if_branches = Vec::new();
+
+                    // Read contents of the if block
+                    let (mut if_contents, mut exit_reason) =
+                        read_contents(chars, coord, id_counter);
+                    if_branches.push(IfBranch {
+                        condition,
+                        contents: if_contents,
+                    });
+
+                    // Read else if branches
+                    while let ReadContentExitReason::ElseIf(else_if_condition) = exit_reason {
+                        (if_contents, exit_reason) = read_contents(chars, coord, id_counter);
+                        if_branches.push(IfBranch {
+                            condition: else_if_condition,
+                            contents: if_contents,
+                        });
+                    }
+
+                    // Read else branch if present
+                    if let ReadContentExitReason::Else = exit_reason {
+                        let (else_contents, exit_reason) = read_contents(chars, coord, id_counter);
+                        if_branches.push(IfBranch {
+                            condition: syn::parse_str("true").unwrap(), // else branch always executes if reached
+                            contents: else_contents,
+                        });
+                        assert!(matches!(exit_reason, ReadContentExitReason::IfClose));
+                    } else {
+                        assert!(matches!(exit_reason, ReadContentExitReason::IfClose));
+                    }
+                } else if expr_content.starts_with("#each") {
+                    let each_str = expr_content.trim_start_matches("#each").trim();
+                    // Expect format: {#each items as item} - each_str should be "items as item"
+                    let parts: Vec<&str> = each_str.split_whitespace().collect();
+                    if parts.len() != 4 || parts[1] != "as" {
+                        panic!(
+                            "Invalid #each expression at line {}, col {}: expected format '{{#each items as item}}'",
+                            coord.line, coord.col
+                        );
+                    }
+                    let iterable_expr = syn::parse_str::<syn::Expr>(parts[0]).unwrap();
+                    let item_name = parts[2].to_string();
+
+                    // Read contents of the each block
+                    let (each_contents, exit_reason) = read_contents(chars, coord, id_counter);
+                    assert!(matches!(exit_reason, ReadContentExitReason::EachClose));
+                    elems.push(Element {
+                        id,
+                        content: ContentType::Each(iterable_expr, item_name, each_contents),
+                    });
+                } else if expr_content.starts_with(":else if") {
+                    let condition_str = expr_content.trim_start_matches(":else if").trim();
+                    let condition = syn::parse_str::<syn::Expr>(condition_str).unwrap();
+                    return (elems, ReadContentExitReason::ElseIf(condition));
+                } else if expr_content.starts_with(":else") {
+                    return (elems, ReadContentExitReason::Else);
+                } else if expr_content.starts_with("/if") {
+                    return (elems, ReadContentExitReason::IfClose);
+                } else if expr_content.starts_with("/each") {
+                    return (elems, ReadContentExitReason::EachClose);
+                } else {
+                    // Just a normal expression in text content
+                    let expr = syn::parse_str::<syn::Expr>(&expr_content).unwrap();
+                    elems.push(Element {
+                        id,
+                        content: ContentType::Expr(expr),
+                    });
+                }
+                read_until(chars, |ch| !ch.is_whitespace(), coord);
+            }
+            _ => {
+                // Text content until the next '{' or '<'
+                let text = read_until(chars, |c| c == '{' || c == '<', coord);
+                elems.push(Element {
+                    id,
+                    content: ContentType::Text(text),
+                });
+            }
+        }
+    }
+
+    (elems, ReadContentExitReason::End)
 }
 
 pub fn read_closing_tag(
@@ -202,10 +306,7 @@ impl Debug for Tag {
                     format!("{}={}", name, quote::ToTokens::to_token_stream(&expr))
                 }
                 AttrType::Closure(_) => {
-                    format!(
-                        "{}=|...| {{ ... }}",
-                        name
-                    )
+                    format!("{}=|...| {{ ... }}", name)
                 }
             })
             .collect::<Vec<_>>()
@@ -291,11 +392,15 @@ fn parse_attr(
             chars.next();
             let value = read_attr_expression(chars, coord);
             expect_next(chars, '}', coord);
-            rs_parse::parse_attr_expression(&value, EVENTS
+
+            let attr_is_event_type = EVENTS
                 .iter()
-                .any(|(event_name, _, _)| event_name == &attr_name)).expect(&format!(
-                "Failed to parse attribute expression for attribute '{}' at line {}, col {}", 
-                attr_name, coord.line, coord.col))
+                .any(|(event_name, _, _)| event_name == &attr_name);
+
+            rs_parse::parse_attr_expression(&value, attr_is_event_type).expect(&format!(
+                "Failed to parse attribute expression for attribute '{}' at line {}, col {}",
+                attr_name, coord.line, coord.col
+            ))
         } else {
             panic!(
                 "Unexpected character '{}' while reading attribute value at line {}, col {}",

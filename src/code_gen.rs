@@ -1,19 +1,38 @@
 use crate::{
     CompileOutput,
     parse::{
-        ScriptData, StateVar,
+        StateVar,
         html_parse::{self, AttrType},
     },
-    transform::{EventHandler, Patch, PatchOp},
+    transform::{EventHandler, PatchOp},
     utils::CompileError,
 };
 
+pub enum ElementArrayItem {
+    Element,
+    If(Vec<ElementArrayItem>),
+    Each(Vec<ElementArrayItem>),
+}
+
 pub struct CodeGenContext {
-    pub event_handlers: Vec<EventHandler>,
-    pub body: html_parse::Element,
-    pub script_data: ScriptData,
-    pub style: Option<String>,
-    pub patch_generators: Vec<Patch>,
+    pub element_array: Vec<ElementArrayItem>,
+    //pub state_vars (props, bindables, reactive, derived)
+    
+    //pub children_state (top level)
+    //pub fragment_state
+    
+    //pub mount_code
+    //pub init_code
+    pub agnostic_code: Vec<proc_macro2::TokenStream>,
+
+    //pub event_handlers
+    //pub bind_handlers
+    //pub derived_handlers
+    //pub patch_generators
+    //pub child_propagators
+
+    //pub html_body
+    //pub styles
 }
 
 pub fn code_gen(context: CodeGenContext) -> Result<CompileOutput, CompileError> {

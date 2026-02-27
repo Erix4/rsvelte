@@ -1,0 +1,33 @@
+<script>
+    let mut counter = $state(0);
+
+    fn increment($counter) {
+        *counter = add(*counter, 1);
+    }
+
+    fn add<T: std::ops::Add<Output = T>>(a: T, b: T) -> T {
+        a + b
+    }
+</script>
+
+<div id="counter-app" onmousemove={|$counter| increment(counter)}>
+    <p>Counter: {counter}</p>
+    <button>Increment</button>
+    <p style={format!("font-size: {}px", *counter / 10)}>Growing text</p>
+</div>
+
+<style>
+    #counter-app {
+        width: 100%;
+        height: 100vh;
+    }
+
+    p {
+        font-size: 1.5em;
+        color: red;
+    }
+    button {
+        padding: 0.5em 1em;
+        font-size: 1em;
+    }
+</style>

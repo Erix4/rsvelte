@@ -1,7 +1,6 @@
 use proc_macro2::TokenStream;
 use syn::{FnArg, Ident};
 
-use super::{ReactiveVar, gen_funcs::FuncData};
 use crate::parse::html_parse::AttrType;
 
 pub fn gen_expr(
@@ -172,8 +171,8 @@ fn get_reactive_vars_in_expr(
 
 #[derive(Clone)]
 pub struct AttrClosure {
-    pub args: Vec<syn::Ident>,
-    pub event_arg: Option<syn::Ident>,
+    pub state_arg: bool,
+    pub event_arg: Option<syn::Type>,
     pub body: syn::Expr,
 }
 
@@ -191,7 +190,7 @@ pub fn parse_attr_expression(expr: &String, is_event: bool) -> syn::Result<AttrT
             }
         }
 
-        let mut closure_args = Vec::new();
+        let mut state_arg = false;
         let mut event_arg = None;
         let closure_args_strs = closure_str
             .trim_matches('|')
@@ -200,9 +199,8 @@ pub fn parse_attr_expression(expr: &String, is_event: bool) -> syn::Result<AttrT
             .collect::<Vec<&str>>();
 
         for arg in closure_args_strs {
-            if arg.starts_with('$') {
-                let parsed_ident: syn::Ident = syn::parse_str(&arg[1..])?;
-                closure_args.push(parsed_ident);
+            if arg == "$state" {
+                state_arg = true;
             } else {
                 if let None = event_arg {
                     if !is_event {
@@ -211,12 +209,10 @@ pub fn parse_attr_expression(expr: &String, is_event: bool) -> syn::Result<AttrT
                             "Non-event handler closures cannot have non-reactive arguments",
                         ));
                     }
-                    event_arg = if let Ok(FnArg::Typed(arg)) = syn::parse_str::<syn::FnArg>(arg)
-                        && let syn::Pat::Ident(ident) = *arg.pat
-                    {
-                        Some(ident.ident)
+                    event_arg = if let Ok(FnArg::Typed(arg)) = syn::parse_str::<syn::FnArg>(arg) {
+                        Some(*arg.ty)
                     } else {
-                        Some(syn::parse_str::<syn::Ident>(arg)?.clone())
+                        Some(syn::parse2(quote::quote! {web_sys::Event})?)
                     }
                 } else {
                     return Err(syn::Error::new(
@@ -232,7 +228,7 @@ pub fn parse_attr_expression(expr: &String, is_event: bool) -> syn::Result<AttrT
         let body_expr: syn::Expr = syn::parse_str(&remaining_expr)?;
 
         Ok(AttrType::Closure(AttrClosure {
-            args: closure_args,
+            state_arg,
             event_arg,
             body: body_expr,
         }))

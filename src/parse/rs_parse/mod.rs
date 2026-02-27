@@ -1,14 +1,12 @@
 use std::fmt::Debug;
 use syn::{
-    Token,
-    parse::{Parse, ParseStream, Peek},
+    Ident, ItemFn, Token, parse::{Parse, ParseStream, Peek}
 };
 
 mod gen_vars;
+pub use gen_vars::{StateVar, Prop};
 use gen_vars::gen_vars;
-pub use gen_vars::{ReactiveVar, StateVar};
 mod gen_funcs;
-pub use gen_funcs::FuncData;
 mod gen_expr;
 pub use gen_expr::*;
 
@@ -17,89 +15,97 @@ pub fn parse_script(js: &str) -> Result<ScriptData, crate::CompileError> {
     Ok(syn::parse_str::<ScriptData>(js)?)
 }
 
+pub struct ComponentImport {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Default)]
 pub struct ScriptData {
-    pub reactive_vars: Vec<ReactiveVar>,
-    pub non_reactive_vars: Vec<StateVar>,
-    pub init_code: Option<proc_macro2::TokenStream>,
-    pub functions: Vec<FuncData>,
-    pub imports: Vec<proc_macro2::TokenStream>,
+    // $state variables
+    pub props: Vec<Prop>,
+    pub bindable_props: Vec<Prop>,
+    pub state_vars: Vec<StateVar>,
+    pub derived_vars: Vec<StateVar>,
+
+    pub init_func: Option<ItemFn>,
+    pub state_functions: Vec<ItemFn>,
+
+    pub imports: Vec<ComponentImport>,
+    pub agnostic_code: Vec<proc_macro2::TokenStream>,
 }
 
 impl Debug for ScriptData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ScriptData {{ reactive_vars: {:?}, non_reactive_vars: {:?}, functions: {:?}, imports: {:?} }}",
-            self.reactive_vars,
-            self.non_reactive_vars,
-            self.functions
-                .iter()
-                .map(|func| func.code.sig.ident.to_string())
-                .collect::<Vec<_>>(),
-            self.imports
-                .iter()
-                .map(|imp| imp.to_string())
-                .collect::<Vec<_>>(),
+            "ScriptData {{\n  props: {:?},\n  bindable_props: {:?},\n  state_vars: {:?},\n  derived_vars: {:?},\n  agnostic_code: {:?}\n}}",
+            self.props,
+            self.bindable_props,
+            self.state_vars,
+            self.derived_vars,
+            self.agnostic_code
         )
     }
 }
 
 impl Parse for ScriptData {
     fn parse(mut input: ParseStream) -> syn::Result<Self> {
-        let mut script_data = ScriptData {
-            reactive_vars: Vec::new(),
-            non_reactive_vars: Vec::new(),
-            init_code: None,
-            functions: Vec::new(),
-            imports: Vec::new(),
-        };
+        let mut script_data = ScriptData::default();
 
-        let mut init_stmts = Vec::new();
+        // Read contents of script block
         loop {
             if input.is_empty() {
                 break;
             }
 
-            if input.parse::<Token![let]>().is_ok() {
-                gen_vars(
-                    &mut input,
-                    &mut script_data.reactive_vars,
-                    &mut script_data.non_reactive_vars,
-                )?;
-            } else if input.peek(Token![fn]) {
-                let func: FuncData = input.parse()?;
-                script_data.functions.push(func);
-            } else if input.peek(Token![use]) || input.peek(Token![mod]) {
-                // Parse import statement
-                let import_tokens = parse_to(input, Token![;], true)?;
-                script_data.imports.push(import_tokens);
+            if input.peek(Token![struct]) {
+                // Check if it's the state struct
+                if input.peek2(Token![$]) {
+                    gen_vars(&mut input, &mut script_data)?;
+                } else {
+                    // Non-state struct
+                    let new_struct = input.parse::<syn::ItemStruct>()?;
+                    script_data.agnostic_code.push(quote::quote! { #new_struct });
+                }
+            } else if input.peek(Token![impl]) {
+                // Check if it's an impl block for the state struct
+                if input.peek2(Token![$]) {
+                    let impl_block = input.parse::<syn::ItemImpl>()?;
+                    script_data.agnostic_code.push(quote::quote! { #impl_block });
+                } else {
+                    // Non-state impl block
+                    let new_impl = input.parse::<syn::ItemImpl>()?;
+                    script_data.agnostic_code.push(quote::quote! { #new_impl });
+                }
+            } else if input.peek(Ident) {
+                let fork = input.fork();
+                let ident: Ident = fork.parse()?;
+
+                if ident != "import" {
+                    let item: syn::Item = input.parse()?;
+                    script_data.agnostic_code.push(quote::quote! { #item });
+                    continue;
+                }
+
+                // Handle component import statements
+                let _: Ident = input.parse()?; // Consume 'import' keyword
+                let component_name: Ident = input.parse()?;
+                let _: Ident = input.parse()?; // Consume 'from' keyword
+                let import_path: syn::LitStr = input.parse()?;
+
+                script_data.imports.push(ComponentImport {
+                    name: component_name.to_string(),
+                    path: import_path.value(),
+                });
             } else {
-                // init statement
-                let init_tokens = parse_to(input, Token![;], true)?;
-                init_stmts.push(init_tokens);
+                // Unrecognized item, consume it as tokens
+                let item: syn::Item = input.parse()?;
+                script_data.agnostic_code.push(quote::quote! { #item });
             }
         }
 
         let _: proc_macro2::TokenStream = input.parse()?; // Ensure code is consumed
-
-        // Check that reactive arguments in functions are valid
-        for func in &script_data.functions {
-            for reactive_arg in &func.reactive_args {
-                if !script_data
-                    .reactive_vars
-                    .iter()
-                    .any(|rv| rv.var.name == *reactive_arg)
-                {
-                    return Err(syn::Error::new(
-                        reactive_arg.span(),
-                        format!(
-                            "Reactive argument '{}' not declared as reactive state variable",
-                            reactive_arg
-                        ),
-                    ));
-                }
-            }
-        }
 
         Ok(script_data)
     }

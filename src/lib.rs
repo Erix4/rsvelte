@@ -29,7 +29,10 @@ mod utils;
 
 use colored::Colorize;
 use log::{error, info};
+use tempdir::TempDir;
 use utils::*;
+
+use crate::parse::get_all_components;
 
 /// List of supported events: (attribute name, web_sys type, JS event type)
 ///
@@ -71,15 +74,15 @@ pub struct CompileOutput {
 
 /// Main compile function
 /// # Arguments
-/// * `filepath` - Path to the .rsvelte file to compile
+/// * `filepath` - Path to the root of the RSvelte project
 /// # Returns
 /// * `Result<CompileOutput>` - Generated code strings
 pub fn compile(filepath: &str) -> Result<CompileOutput, CompileError> {
     // 1. Parse
-    let component_ast = match parse::parse(filepath) {
-        Ok(ast) => {
+    let components = match get_all_components(filepath) {
+        Ok(comps) => {
             info!("Parsing {}", "SUCCEEDED".green());
-            ast
+            comps
         }
         Err(err) => {
             error!("Parsing {}: \n   {}", "FAILED".red(), err);
@@ -88,7 +91,7 @@ pub fn compile(filepath: &str) -> Result<CompileOutput, CompileError> {
     };
 
     // 2. Transform
-    let context = match transform::transform(component_ast) {
+    let context = match transform::transform(components) {
         Ok(ctx) => {
             info!("Transformation {}", "SUCCEEDED".green());
             ctx
@@ -112,10 +115,58 @@ pub fn compile(filepath: &str) -> Result<CompileOutput, CompileError> {
     }
 }
 
-const LIB_RS: &str = include_str!("static_files/lib.rs");
-const PATCHES_JS: &str = include_str!("static_files/patches.js");
-const INDEX_HTML: &str = include_str!("static_files/index.html");
-const CARGO_TOML: &str = include_str!("static_files/Cargo.toml");
+/// Compile .rsvelte file to WebAssembly module in provided output directory
+/// 
+/// 
+pub fn compile_to_wasm(filepath: &str, output_path: &str) -> Result<(), CompileError> {
+    let compile_out = compile(filepath)?;
+
+    let temp_dir: TempDir = TempDir::new("rs_output")?;
+    let compile_path = temp_dir.path();
+    let src_path = compile_path.join("src");
+    std::fs::create_dir(&src_path)?;
+    std::fs::write(&src_path.join("lib.rs"), LIB_RS)?;
+    std::fs::write(src_path.join("state.rs"), compile_out.state_rs)?;
+    std::fs::write(compile_path.join("Cargo.toml"), CARGO_TOML)?;
+
+    // Compile to WASM using cargo
+    let status = std::process::Command::new("cargo")
+        .arg("build")
+        .arg("--target")
+        .arg("wasm32-unknown-unknown")
+        .current_dir(compile_path)
+        .status()?;
+    if !status.success() {
+        return Err(generic_error("Cargo build failed"));
+    }
+
+    // Copy generated files to output_path
+    let pkg_path = compile_path
+        .join("target")
+        .join("wasm32-unknown-unknown")
+        .join("debug");
+    std::fs::create_dir_all(output_path)?;
+    std::fs::copy(
+        pkg_path.join("rs_output.wasm"),
+        std::path::Path::new(output_path).join("main.wasm"),
+    )?;
+
+    Ok(())
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(target_os="windows")] {
+        const LIB_RS: &str = include_str!(r"static_files\lib.rs");
+        const PATCHES_JS: &str = include_str!(r"static_files\patches.js");
+        const INDEX_HTML: &str = include_str!(r"static_files\index.html");
+        const CARGO_TOML: &str = include_str!(r"static_files\Cargo.toml");
+    } else if #[cfg(any(target_os="linux", target_os="macos"))] {
+        const LIB_RS: &str = include_str!(r"static_files/lib.rs");
+        const PATCHES_JS: &str = include_str!(r"static_files/patches.js");
+        const INDEX_HTML: &str = include_str!(r"static_files/index.html");
+        const CARGO_TOML: &str = include_str!(r"static_files/Cargo.toml");
+    }
+}
 
 /// Setup output directory for manual development
 ///

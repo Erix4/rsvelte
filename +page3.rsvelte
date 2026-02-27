@@ -1,0 +1,29 @@
+<script>
+    let mut counter = $state(0);
+    let mut test = $state(10);
+    let style = "color: red;";
+
+    fn increment(e: MouseEvent) {
+        counter = add(counter, 1);
+    }
+
+    fn add<T: std::ops::Add<Output = T>>(a: T, b: T) -> T {
+        a + b
+    }
+</script>
+
+<div>
+    <p style={style}>{counter}</p>
+    <p>{if style.chars().map(|c| c += 1).any(|c| c == 'a') { "hello" } else { "goodbye" } }</p>
+    <button onclick={|e| { counter += 1; increment(e) } }>Increment</button>
+</div>
+
+<style>
+    p {
+        font-size: 1.5em;
+    }
+    button {
+        padding: 0.5em 1em;
+        font-size: 1em;
+    }
+</style>

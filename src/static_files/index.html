@@ -6,23 +6,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>svelters-output</title>
     <style>
+        p {
+            margin: 0;
+        }
     </style>
     <script type="module">
-        import init, { first_patch } from './pkg/svelters_output.js';
-        import { buildNodeMap, setupEventListeners } from './startup.js';
-        import { applyPatches } from './patches.js';
-
-        async function run_init() {
-            await init();
-            let patches = await first_patch();
-            applyPatches(patches, nodeMap);
-        }
-        run_init();
-
-        // Initial render
-        const nodeMap = buildNodeMap();
-        document.body.appendChild(nodeMap[0]);
-        setupEventListeners(nodeMap);
+        import init, { mount } from './pkg/svelters_output.js';
+        init().then(() => {
+            mount();
+        });
 
         // Hot reload WebSocket
         const ws = new WebSocket(`ws://${window.location.host}/ws`);

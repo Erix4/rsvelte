@@ -1,0 +1,74 @@
+<script>
+    let mut counter = $state(0);
+    let mut test = $state(10);
+    let style = "color: red;";
+
+    fn increment(counter: $state(u64), e: MouseEvent) {
+        counter = add(counter, 1);
+    }
+
+    fn increment($counter, e: MouseEvent) {
+        let a = counter;
+        counter = add(&mut counter, a, 1);
+    }
+
+    fn add<T: std::ops::Add<Output = T>>($counter, a: T, b: T) -> T {
+        counter += 1;
+        a + b
+    }
+
+    fn increment(e: MouseEvent)$(counter: u64) {
+        counter = add(counter, 1);
+    }
+
+    #[$state(counter: u64)]
+    fn increment(e: MouseEvent) {
+        counter = add(counter, 1);
+    }
+
+    $[counter: u64]
+    fn increment(e: MouseEvent) {
+        counter = add(counter, 1);
+    }
+
+    $[counter]
+    fn increment(e: MouseEvent) {
+        counter = add(counter, 1);
+    }
+
+    fn increment(e: MouseEvent) {
+        $counter = add($counter, 1);
+    }
+
+    $[counter]
+    fn parent_func() {
+        let counter_ref = &mut counter; <-- problem
+        child_func();
+        *counter_ref += 1;
+    }
+
+    $[counter]
+    fn child_func() {
+        counter += 1;
+    }
+
+    fn add<T: std::ops::Add<Output = T>>(a: T, b: T) -> T {
+        a + b
+    }
+</script>
+
+<div>
+    <p style={style}>{counter}</p>
+    <p>{if style.chars().map(|c| c += 1).any(|c| c == 'a') { "hello" } else { "goodbye" } }</p>
+    <button onclick={|e| { counter += 1; increment(e) } }>Increment</button>
+</div>
+
+<style>
+    p {
+        font-size: 1.5em;
+    }
+    button {
+        padding: 0.5em 1em;
+        font-size: 1em;
+    }
+</style>

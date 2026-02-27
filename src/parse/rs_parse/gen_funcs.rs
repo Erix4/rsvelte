@@ -1,130 +1,87 @@
 use syn::{
     Block, Generics, Ident, ItemFn, ReturnType, Signature, Token, Visibility,
-    parse::{Parse, ParseBuffer, ParseStream},
+    parse::ParseStream,
     punctuated::Punctuated,
-    spanned::Spanned,
 };
 
-pub struct FuncData {
-    pub code: ItemFn,
-    pub reactive_args: Vec<Ident>,
-    pub event_arg: Option<Ident>,
-    pub is_event_handler: bool,
+fn gen_init_func(input: ParseStream) -> syn::Result<ItemFn> {
+    input.parse::<Token![fn]>()?; // Consume 'fn'
+    input.parse::<Token![$]>()?; // Consume '$'
+    
+    let init_ident: Ident = input.parse()?;
+    if init_ident != "init" {
+        return Err(syn::Error::new(
+            init_ident.span(),
+            "Expected 'init' after '$' in state impl block",
+        ));
+    }
+
+    // Parse generics (e.g., <T, U: Clone>)
+    let mut generics: Generics = input.parse()?;
+
+    // Parse parameters in parentheses
+    let content;
+    syn::parenthesized!(content in input);
+    let params = Punctuated::parse_terminated(&content)?;
+
+    // Parse return type (-> T)
+    let output: ReturnType = input.parse()?;
+
+    // Parse where clause (e.g., where T: Display + Clone)
+    generics.where_clause = input.parse()?;
+
+    // Parse function body
+    let body: Block = input.parse()?;
+
+    Ok(ItemFn {
+        attrs: Vec::new(),
+        vis: Visibility::Inherited,
+        sig: Signature {
+            constness: None,
+            asyncness: None,
+            unsafety: None,
+            abi: None,
+            ident: init_ident.clone(),
+            generics,
+            inputs: params,
+            output,
+            variadic: None,
+            fn_token: <Token![fn]>::default(),
+            paren_token: syn::token::Paren(init_ident.span()),
+        },
+        block: Box::new(body),
+    })
 }
 
-impl Parse for FuncData {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        // Parse visibility (pub, pub(crate), etc.)
-        let vis: Visibility = input.parse()?;
+pub fn get_state_funcs(input: &mut ParseStream) -> syn::Result<(Vec<ItemFn>, Option<ItemFn>)> {
+    input.parse::<Token![impl]>()?; // Consume 'impl'
+    input.parse::<Token![$]>()?; // Consume '$'
 
-        // Parse `fn` keyword
-        input.parse::<Token![fn]>()?;
-
-        // Parse function name
-        let ident: Ident = input.parse()?;
-
-        // Parse generics (e.g., <T, U: Clone>)
-        let mut generics: Generics = input.parse()?;
-
-        // Parse parameters in parentheses
-        let content;
-        syn::parenthesized!(content in input);
-        let (params, reactive_args, event_arg, is_event_handler) = gen_params(content)?;
-
-        // Parse return type (-> T)
-        let output: ReturnType = input.parse()?;
-
-        // Parse where clause (e.g., where T: Display + Clone)
-        generics.where_clause = input.parse()?;
-
-        // Parse function body
-        let body: Block = input.parse()?;
-
-        let code = ItemFn {
-            attrs: Vec::new(),
-            vis,
-            sig: Signature {
-                constness: None,
-                asyncness: None,
-                unsafety: None,
-                abi: None,
-                ident: ident.clone(),
-                generics,
-                inputs: params,
-                output,
-                variadic: None,
-                fn_token: <Token![fn]>::default(),
-                paren_token: syn::token::Paren(ident.span()),
-            },
-            block: Box::new(body),
-        };
-
-        Ok(FuncData {
-            code,
-            reactive_args,
-            event_arg,
-            is_event_handler,
-        })
+    // consume 'state' identifier
+    let state_ident: Ident = input.parse()?;
+    if state_ident != "state" {
+        return Err(syn::Error::new(
+            state_ident.span(),
+            "Expected 'state' after '$'",
+        ));
     }
-}
 
-pub fn gen_params(
-    buffer: ParseBuffer,
-) -> syn::Result<(
-    Punctuated<syn::FnArg, syn::token::Comma>,
-    Vec<Ident>,
-    Option<Ident>,
-    bool,
-)> {
-    let mut params = Vec::new();
-    let mut reactive_args = Vec::new();
-    while !buffer.is_empty() {
-        // Check for reactive argument
-        if buffer.parse::<Token![$]>().is_ok() {
-            let ident = buffer.parse::<Ident>()?;
-            reactive_args.push(ident.clone());
+    let content;
+    syn::braced!(content in input);
+
+    let mut funcs = Vec::new();
+    let mut init_func = None;
+
+    while !content.is_empty() {
+        if content.peek2(Token![$]) {
+            // $init function
+            init_func = Some(gen_init_func(&content)?);
         } else {
-            let param: syn::FnArg = buffer.parse()?;
-            params.push(param);
-        }
-
-        if buffer.peek(Token![,]) {
-            let _comma: Token![,] = buffer.parse()?;
-        } else {
-            break;
+            // Regular function
+            let func: ItemFn = content.parse()?;
+            funcs.push(func);
         }
     }
 
-    let event_types = crate::EVENTS
-        .iter()
-        .map(|(_name, ty, _)| ty.to_string())
-        .collect::<Vec<String>>();
-    let mut event_arg_out = None;
-
-    // Check for event argument
-    for param in &params {
-        if let syn::FnArg::Typed(pat_type) = param {
-            let ty_str = quote::quote! { #pat_type.ty }.to_string();
-            if event_types.contains(&ty_str) {
-                if let Some(_) = event_arg_out {
-                    return Err(syn::Error::new(
-                        pat_type.span(),
-                        "Multiple event arguments found; only one event argument is allowed per function",
-                    ));
-                }
-                if let syn::Pat::Ident(pat_ident) = &*pat_type.pat {
-                    event_arg_out = Some(pat_ident.ident.clone());
-                }
-            }
-        }
-    }
-
-    let is_event_handler = params.len() == 0 || (event_arg_out.is_some() && params.len() == 1);
-
-    Ok((
-        Punctuated::from_iter(params),
-        reactive_args,
-        event_arg_out,
-        is_event_handler,
-    ))
+    Ok((funcs, init_func))
 }

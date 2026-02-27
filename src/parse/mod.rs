@@ -6,7 +6,44 @@ pub mod html_parse;
 mod rs_parse;
 
 use html_parse::{TagType, read_closing_tag, read_element_with_tag};
-pub use rs_parse::{ScriptData, gen_expr, FuncData, ReactiveVar, StateVar};
+pub use rs_parse::{ScriptData, StateVar, Prop, gen_expr};
+
+pub fn get_all_components(path: &str) -> Result<Vec<(String, ComponentAST)>, CompileError> {
+    let mut components = Vec::new();
+    let mut paths_to_process = vec![path.to_string()];
+    let mut seen_paths = std::collections::HashSet::new();
+
+    while let Some(current_path) = paths_to_process.pop() {
+        if seen_paths.contains(&current_path) {
+            continue;
+        }
+        seen_paths.insert(current_path.clone());
+
+        let component_ast = parse(&current_path)?;
+
+        // Add imported components to paths_to_process
+        if let Some(script) = &component_ast.script {
+            for import in &script.imports {
+                // Check if the import path is absolute or relative
+                if import.path.starts_with("/") {
+                    paths_to_process.push(import.path.clone());
+                    continue;
+                }
+
+                // Resolve relative import path
+                let import_path = std::path::Path::new(&current_path)
+                    .parent()
+                    .unwrap()
+                    .join(&import.path);
+                paths_to_process.push(import_path.to_str().unwrap().to_string());
+            }
+        }
+
+        components.push((current_path, component_ast));
+    }
+
+    Ok(components)
+}
 
 pub struct ComponentAST {
     pub body: html_parse::Element,
