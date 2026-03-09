@@ -1,28 +1,19 @@
+use std::collections::HashMap;
+
 use syn::Token;
 
+pub use crate::transform::derived::DerivedVar;
+pub use crate::transform::node::Node;
 use crate::{
-    EVENTS,
-    code_gen::CodeGenContext,
-    parse::{self, ComponentAST, html_parse::AttrType},
-    transform::{self, node::Node},
-    utils::{CompileError, generic_error},
+    code_gen::CodeGenContext, parse::{self, ComponentAST, html_parse::AttrType}, transform::func::{transform_func, validate_event_handler_args}, utils::{CompileError, generic_error}
 };
 
-mod attr;
-mod each_block;
+mod derived;
 mod expr;
-mod if_block;
 mod node;
 mod patches;
-mod utils;
-
-pub struct EventHandler {
-    pub event_type: syn::Type,
-    pub js_event_type: String,
-    pub target_id: u32,
-    pub closure: syn::ExprCall,
-    pub dirty_flags: u32,
-}
+mod event;
+mod func;
 
 struct ReactiveVar {
     name: syn::Ident,
@@ -59,6 +50,7 @@ pub fn transform(
     }
     let page_component = components.remove(0);
     transform_component(page_component, &components)
+    // TODO: also transform child components and store their CodeGenContexts in the parent context for code generation
 }
 
 fn transform_component(
@@ -68,8 +60,7 @@ fn transform_component(
     // Check that event attributes have matching functions,
     // and collect event handlers
     let html_events = comp.body.get_events();
-    let mut event_handlers = Vec::new();
-    let mut script = if let Some(script) = comp.script {
+    let script = if let Some(script) = comp.script {
         script
     } else if !html_events.is_empty() {
         return Err(generic_error(
@@ -88,86 +79,153 @@ fn transform_component(
         }
     };
 
-    // Transform html AST to Node tree
-    let mut tuple_idx_counter = 0;
+    // Combine all reactive variables into a single list for easy lookup during transformation
+    let state_vars: Vec<ReactiveVar> =
+        script.state_vars.into_iter().map(Into::into).collect();
     let reactive_vars: Vec<ReactiveVar> = script
         .props
         .iter()
         .cloned()
         .map(Into::into)
         .chain(script.bindable_props.iter().cloned().map(Into::into))
-        .chain(script.state_vars.iter().cloned().map(Into::into))
         .chain(script.derived_vars.iter().cloned().map(Into::into))
         .collect();
+
+    // Create map from component imports to their ASTs for easy lookup during transformation
+    let mut component_map = HashMap::new();
+    for comp in components {
+        if let Some(import) = script
+            .imports
+            .iter()
+            .find(|import| import.path == comp.source_path)
+        {
+            component_map.insert(&import.name, comp);
+        } else {
+            return Err(generic_error(&format!(
+                "Component '{}' imported but not found in project",
+                comp.source_path
+            )));
+        }
+    }
+
+    // Transform html AST to Node tree
+    let mut tuple_idx_counter = 0;
     let state_funcs = script
         .state_functions
         .iter()
-        .map(|func| func.sig.ident)
+        .map(|func| &func.sig.ident)
         .collect();
     let node_tree = Node::from_element(
         comp.body,
         &mut tuple_idx_counter,
+        &state_vars,
         &reactive_vars,
         &state_funcs,
+        &component_map
     );
 
-    log::info!("Generating event handlers...");
-    for (target_id, event_name, attr) in html_events {
-        let mut attr = attr.clone();
-        transform::find_function_calls(&mut attr, &script.functions);
+    // Build reactive var data & dependency graph for derived and bindables
+    let derived_handlers = derived::build_derived_order(
+        script.derived_vars.clone(),
+        &state_vars,
+        &reactive_vars,
+    );
 
-        let (closure, dirty_flags) =
-            parse::gen_expr(&attr, &script.functions, &script.reactive_vars)?;
+    // Transform init code
+    let init_code = if let Some(init_func) = script.init_func {
+        let init_func = transform_func(init_func, &reactive_vars);
+        quote::quote! {
+            #init_func
+        }
+    } else {
+        // Add empty fn if not user provided
+        quote::quote! {
+            fn init(&mut self) {}
+        }
+    };
+    let mut state_funcs = vec![init_code];
 
-        let event_type = EVENTS
-            .iter()
-            .find(|(name, _, _)| *name == *event_name)
-            .expect(&format!(
-                "Event '{}' not found in EVENTS list",
-                event_name
-            ));
-        event_handlers.push(EventHandler {
-            event_type: syn::parse_str(event_type.1).unwrap(),
-            js_event_type: event_type.2.to_string(),
-            target_id: target_id,
-            closure,
-            dirty_flags,
-        });
+    // Find and transform event handlers (functions, callers, and closures), validating their arguments
+    for func in script.state_functions {
+        let new_func = transform_func(func, &reactive_vars);
+        if !validate_event_handler_args(&new_func) {
+            return Err(generic_error(&format!(
+                "Event handler '{}' has invalid arguments. Event handlers must have a `&mut self` argument and optionally a single event argument of type `&Event` or `&MouseEvent` etc.",
+                new_func.sig.ident
+            )));
+        }
+        state_funcs.push(quote::quote! { #new_func });
     }
+    // Generate event handling branches
+    // event type, target id, function or closure call
 
-    log::info!("Extracting patch generators...");
-    // Traverse body to find patch generators
-    let patch_generators = patches::extract_generators(
-        &ast.body,
-        &script.non_reactive_vars,
-        &script.reactive_vars,
-    );
+    // Create list of child component state to store in the component struct
 
-    let mod_paths = Vec::new();
-    for import in &script.imports {
-        if let syn::Item::Use(item_use) =
-            syn::parse2(import.clone()).map_err(|e| {
-                generic_error(&format!(
-                    "Failed to parse import statement: {}",
-                    e
-                ))
-            })?
-        {
-            for segment in item_use.tree.into_iter() {
-                if let syn::UseTree::Path(use_path) = segment {
-                    mod_paths.push(use_path.ident.clone().into());
-                }
+    // For child components with bindable props, add bind handlers
+
+    // Add child component prop updaters & downward propagation
+
+    // Scope CSS styles to the component
+
+    // TODO: overhaul importing system to use Rust syntax
+
+    Ok(CodeGenContext {
+        node_tree,
+        derived_handlers,
+        state_funcs,
+        agnostic_code: script.agnostic_code,
+    })
+}
+
+/*
+log::info!("Generating event handlers...");
+for (target_id, event_name, attr) in html_events {
+    let mut attr = attr.clone();
+    transform::find_function_calls(&mut attr, &script.functions);
+
+    let (closure, dirty_flags) =
+        parse::gen_expr(&attr, &script.functions, &script.reactive_vars)?;
+
+    let event_type = EVENTS
+        .iter()
+        .find(|(name, _, _)| *name == *event_name)
+        .expect(&format!(
+            "Event '{}' not found in EVENTS list",
+            event_name
+        ));
+    event_handlers.push(EventHandler {
+        event_type: syn::parse_str(event_type.1).unwrap(),
+        js_event_type: event_type.2.to_string(),
+        target_id: target_id,
+        closure,
+        dirty_flags,
+    });
+}
+
+log::info!("Extracting patch generators...");
+// Traverse body to find patch generators
+let patch_generators = patches::extract_generators(
+    &ast.body,
+    &script.non_reactive_vars,
+    &script.reactive_vars,
+);
+
+let mod_paths = Vec::new();
+for import in &script.imports {
+    if let syn::Item::Use(item_use) =
+        syn::parse2(import.clone()).map_err(|e| {
+            generic_error(&format!(
+                "Failed to parse import statement: {}",
+                e
+            ))
+        })?
+    {
+        for segment in item_use.tree.into_iter() {
+            if let syn::UseTree::Path(use_path) = segment {
+                mod_paths.push(use_path.ident.clone().into());
             }
         }
     }
-
-    Ok(CodeGenContext {
-        event_handlers,
-        body: ast.body,
-        script_data: script,
-        style: ast.style,
-        patch_generators,
-    })
 }
 
 pub fn find_function_calls(attr: &mut AttrType, functions: &Vec<FuncData>) {
@@ -183,42 +241,4 @@ pub fn find_function_calls(attr: &mut AttrType, functions: &Vec<FuncData>) {
             }
         }
     }
-}
-
-pub fn add_reactive_vars_to_func(
-    func: &mut FuncData,
-    reactive_vars: &Vec<ReactiveVar>,
-) {
-    for rv in func.reactive_args.iter() {
-        let reactive_var = reactive_vars
-            .iter()
-            .find(|r| &r.var.name == rv)
-            .expect(&format!(
-                "Reactive variable '{}' not found for function '{}'",
-                rv, func.code.sig.ident
-            ));
-        if &reactive_var.var.name == rv {
-            // create &mut version of type
-            let mut_ty = syn::Type::Reference(syn::TypeReference {
-                and_token: Token![&](proc_macro2::Span::call_site()),
-                lifetime: None,
-                mutability: Some(Token![mut](proc_macro2::Span::call_site())),
-                elem: Box::new(reactive_var.var.ty.clone()),
-            });
-
-            let arg = syn::FnArg::Typed(syn::PatType {
-                attrs: Vec::new(),
-                pat: Box::new(syn::Pat::Ident(syn::PatIdent {
-                    attrs: Vec::new(),
-                    by_ref: None,
-                    mutability: None,
-                    ident: reactive_var.var.name.clone(),
-                    subpat: None,
-                })),
-                colon_token: Token![:](proc_macro2::Span::call_site()),
-                ty: Box::new(mut_ty),
-            });
-            func.code.sig.inputs.push(arg);
-        }
-    }
-}
+}*/

@@ -1,17 +1,26 @@
+use std::collections::HashMap;
+
 use quote::format_ident;
 use syn::Ident;
 
+mod attr;
+mod each_block;
+mod if_block;
+mod utils;
+
 use crate::{
-    parse::html_parse::{AttrType, ContentType, Element},
+    parse::{
+        ComponentAST,
+        html_parse::{AttrType, ContentType, Element},
+    },
     transform::{
         ReactiveVar,
-        attr::transform_attr,
-        each_block::{EachVar, get_each_element_functions},
         expr::{infer_iter_item_type, transform_content_expr},
-        if_block::get_if_element_functions,
-        utils::{
-            find_all_fragments, get_content_accessor, get_tuple_type_for_nodes,
-            scoped_vars_as_args, scoped_vars_as_params,
+        node::{
+            attr::transform_attr,
+            each_block::{EachVar, get_each_element_functions},
+            if_block::get_if_element_functions,
+            utils::*,
         },
     },
 };
@@ -31,9 +40,10 @@ pub struct TagAttribute {
 pub enum NodeType {
     Text(String),
     Expr(syn::Expr, u64), // Expression and its dirty flag mask
-    Tag(String, Vec<TagAttribute>, Vec<Node>), // tag and its contents
+    Tag(String, Vec<TagAttribute>, Vec<Node>), // tag name, its attributes and its contents
     If(Vec<NodeIfBranch>, Option<Vec<Node>>, Ident, u64), // if branches, else branch, enum name, expression dirty flag mask
     Each(syn::Expr, EachVar, Vec<Node>, u64), // iterable expression, item var, contents, expression dirty flag mask
+    Comp(String, Vec<(TagAttribute, u64)>), // component name and its props & their child comp masks
 }
 
 /// Represents a node in the transformed AST, which can be used for code generation.
@@ -96,31 +106,65 @@ impl Node {
     pub fn from_element(
         value: Element,
         tuple_idx_counter: &mut usize,
+        state_vars: &Vec<ReactiveVar>,
         reactive_vars: &Vec<ReactiveVar>,
-        state_funcs: &Vec<Ident>,
+        state_funcs: &Vec<&Ident>,
+        component_map: &HashMap<&String, &ComponentAST>,
     ) -> Self {
         let tuple_idx = *tuple_idx_counter;
         *tuple_idx_counter += 1;
-        // TODO: add unique component identifier to mount name
-        let mount_name = format_ident!("node_{}", value.id);
+        let mount_name = format_ident!("node_{}_", value.id);
         let content = match value.content {
             ContentType::Text(txt) => NodeType::Text(txt),
             ContentType::Expr(expr) => {
                 let (expr, flag_mask) =
-                    transform_content_expr(expr, reactive_vars);
+                    transform_content_expr(expr, state_vars, reactive_vars);
                 NodeType::Expr(expr, flag_mask)
             }
             ContentType::Tag(tag, children) => {
-                let (tag_name, attributes) =
-                    transform_attr(tag, reactive_vars, state_funcs);
+                let (tag_name, attributes): (String, Vec<TagAttribute>) =
+                    transform_attr(tag, state_vars, reactive_vars, state_funcs);
+                if tag_name.starts_with(char::is_uppercase) {
+                    // check if this is a valid component
+                    if let Some(comp_ast) = component_map.get(&tag_name) {
+                        // Get comp type from comp id hash
+                        let comp_name = format!("C{}", comp_ast.id_hash);
+                        let attributes = if let Some(props) =
+                            comp_ast.script.as_ref().map(|script| &script.props)
+                        {
+                            attributes
+                                .into_iter()
+                                .map(|attr| {
+                                    let flag_mask = props
+                                        .iter()
+                                        .find(|prop| prop.name == attr.name)
+                                        .map(|prop| 1 << prop.flag_pos).expect("Component props must be defined in the component script");
+                                    (attr, flag_mask)
+                                })
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
+                        return Node {
+                            id: value.id,
+                            tuple_idx,
+                            mount_name,
+                            content: NodeType::Comp(comp_name, attributes),
+                        };
+                    } else {
+                        panic!("Component {} not found in imports", tag_name);
+                    }
+                }
                 let child_nodes = children
                     .into_iter()
                     .map(|child| {
-                        Node::from(
+                        Node::from_element(
                             child,
                             tuple_idx_counter,
+                            state_vars,
                             reactive_vars,
                             state_funcs,
+                            component_map,
                         )
                     })
                     .collect();
@@ -134,10 +178,11 @@ impl Node {
                     .map(|(idx, branch)| {
                         let (condition, flags) = transform_content_expr(
                             branch.condition,
+                            state_vars,
                             reactive_vars,
                         );
                         flag_mask |= flags;
-                        
+
                         // Reset tuple index counter for branches so that they start at 0 and don't include parent nodes
                         let mut branch_tuple_idx_counter = 0;
 
@@ -147,11 +192,13 @@ impl Node {
                                 .contents
                                 .into_iter()
                                 .map(|child| {
-                                    Node::from(
+                                    Node::from_element(
                                         child,
                                         &mut branch_tuple_idx_counter,
+                                        state_vars,
                                         reactive_vars,
                                         state_funcs,
+                                        component_map,
                                     )
                                 })
                                 .collect(),
@@ -166,11 +213,13 @@ impl Node {
                     else_contents
                         .into_iter()
                         .map(|child| {
-                            Node::from(
+                            Node::from_element(
                                 child,
                                 &mut else_tuple_idx_counter,
+                                state_vars,
                                 reactive_vars,
                                 state_funcs,
+                                component_map,
                             )
                         })
                         .collect()
@@ -188,18 +237,24 @@ impl Node {
                     name: format_ident!("{}", item_name),
                     ty: infer_iter_item_type(&iter_expr, reactive_vars),
                 };
-                let (each_expr, flags) = transform_content_expr(iter_expr, reactive_vars);
+                let (each_expr, flags) = transform_content_expr(
+                    iter_expr,
+                    state_vars,
+                    reactive_vars,
+                );
 
                 // Reset tuple index counter for each content so that it starts at 0 and doesn't include parent nodes
                 let mut each_tuple_idx_counter = 0;
                 let content_nodes = children
                     .into_iter()
                     .map(|child| {
-                        Node::from(
+                        Node::from_element(
                             child,
                             &mut each_tuple_idx_counter,
+                            state_vars,
                             reactive_vars,
                             state_funcs,
+                            component_map,
                         )
                     })
                     .collect();
@@ -216,7 +271,7 @@ impl Node {
 
     /// Generate the type of the node for the elements tuple, for example:
     /// ```
-    /// (Element, Text, IfElement<(Element, Element), (Element)>, EachElement<(Element, Element)>)
+    /// (Element, Text, IfElement<(Element, Element), (Element)>, EachElement<(Element, Element), i32>)
     /// ```
     fn as_tuple_type(&self) -> proc_macro2::TokenStream {
         if self.tuple_idx != 0 {
@@ -243,9 +298,13 @@ impl Node {
             NodeType::If(_, _, enum_name, _) => {
                 types.push(quote::quote! { IfElement<#enum_name> });
             }
-            NodeType::Each(_, _, contents, _) => {
+            NodeType::Each(_, each_var, contents, _) => {
                 let content_tuple_type = get_tuple_type_for_nodes(contents);
-                types.push(quote::quote! { EachElement<#content_tuple_type> });
+                let item_type = &each_var.ty;
+                types.push(quote::quote! { EachElement<#content_tuple_type, #item_type> });
+            }
+            NodeType::Comp(comp_name, _) => {
+                types.push(quote::quote! { #comp_name });
             }
         }
         types
@@ -288,6 +347,10 @@ impl Node {
             NodeType::Each(_, _, _, _) => {
                 items.push(quote::quote! { #var_name });
                 // The contents of an each block are stored in a single item
+            }
+            NodeType::Comp(_, _) => {
+                // The component itself is the only item stored for a component node
+                items.push(quote::quote! { #var_name });
             }
         }
         items
@@ -350,6 +413,12 @@ impl Node {
                     let #var_name = #create_func_name(&state #scoped_params)?;
                 }
             }
+            NodeType::Comp(comp_name, _) => {
+                quote::quote! {
+                    let #var_name = #comp_name::new()?;
+                }
+                // Downward state propagation is done after creation in the apply() function
+            }
         }
     }
 
@@ -408,6 +477,12 @@ impl Node {
                     #mount_func_name(&#parent, &#accessor)?;
                 }
             }
+            NodeType::Comp(_, _) => {
+                let tuple_idx = self.tuple_idx;
+                quote::quote! {
+                    #accessor.mount(prepend_path(&parent_path, #tuple_idx), child_append_closure(&#parent))?;
+                }
+            }
         }
     }
 
@@ -424,6 +499,11 @@ impl Node {
                 // Note that unmount functions do not return a result
                 quote::quote! {
                     #unmount_func_name(&#accessor);
+                }
+            }
+            NodeType::Comp(_, _) => {
+                quote::quote! {
+                    #accessor.unmount();
                 }
             }
             _ => {
@@ -502,6 +582,35 @@ impl Node {
                     #update_func_name(&#parent, &state, &mut #accessor, flags #scoped_args)?;
                 }
             }
+            NodeType::Comp(_, props) => {
+                let mut all_comp_flags = 0;
+
+                let mut prop_setters = Vec::new();
+                for (prop, child_comp_mask) in props.iter() {
+                    if let Some(flag_mask) = prop.flag_mask
+                        && let AttrType::Expr(expr) = &prop.value
+                    {
+                        let prop_name = &prop.name;
+                        prop_setters.push(quote::quote! {
+                            if flags & #flag_mask != 0 {
+                                #accessor.#prop_name = #expr;
+                                DIRTY_FLAGS.fetch_or(#child_comp_mask, SeqCst);
+                            }
+                        });
+                        all_comp_flags |= flag_mask;
+                    }
+                }
+
+                quote::quote! {
+                    if flag_snapshot & #all_comp_flags != 0 {
+                        DIRTY_FLAGS.store(0, SeqCst);
+
+                        #(#prop_setters)*
+
+                        #accessor.apply()?;
+                    }
+                }
+            }
         }
     }
 }
@@ -578,7 +687,7 @@ fn get_functions(
         .fold(quote::quote! {}, |acc, code| quote::quote! { #acc #code });
     let name_root_update = format_ident!("{}_update", name_root);
     functions.extend(quote::quote! {
-        fn #name_root_update(parent: &web_sys::Node, state: &#state_type, contents: &#tuple_type, flags: u64 #scoped_args) -> Result<(), JsValue> {
+        fn #name_root_update(parent: &web_sys::Node, state: &#state_type, contents: &#tuple_type, flag_snapshot: u64 #scoped_args) -> Result<(), JsValue> {
             #update_checks
             Ok(())
         }
@@ -600,7 +709,7 @@ fn get_functions(
     for node in fragments {
         match &node.content {
             NodeType::If(if_branches, else_branch, _, _) => {
-                // Get functinos for if block itself
+                // Get functions for if block itself
                 functions.extend(get_if_element_functions(
                     state_type,
                     scoped_vars.clone(),
@@ -626,7 +735,7 @@ fn get_functions(
                         ),
                         state_type,
                         scoped_vars,
-                        else_branch,
+                        &else_branch,
                     );
                     functions.extend(else_functions);
                 }
@@ -646,7 +755,7 @@ fn get_functions(
                     &format!("{}_content", node.mount_name),
                     state_type,
                     &new_scoped_vars,
-                    contents,
+                    &contents,
                 ));
             }
             _ => {}

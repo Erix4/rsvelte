@@ -3,18 +3,81 @@ use syn::{parse::Parser, visit_mut::VisitMut};
 
 /// Find all state variables in the expression, dereference them if necessary and add state accessor,
 /// and extract a bitmask of which variables are used.
-/// 
+///
 /// As an example, the {counter} expression (provided counter is a state variable),
 /// would become: `*state.counter`, but {my_struct.a} would be `state.my_struct.a`.
-/// There's no need to dereference if the state variable is already being accessed with dot notation. 
+/// There's no need to dereference if the state variable is already being accessed with dot notation.
+/// Deferences are only needed on $state variables, as all others have manually set flags.
 pub fn transform_content_expr(
     mut expr: syn::Expr,
+    state_vars: &Vec<ReactiveVar>,
     reactive_vars: &Vec<ReactiveVar>,
 ) -> (syn::Expr, u64) {
     // Use a visitor to traverse the expression AST
     struct VarVisitor<'a> {
+        state_vars: &'a Vec<ReactiveVar>,
         reactive_vars: &'a Vec<ReactiveVar>,
         flags: u64,
+    }
+
+    impl<'a, 'ast> syn::visit_mut::VisitMut for VarVisitor<'a> {
+        fn visit_expr_mut(&mut self, expr: &mut syn::Expr) {
+            if let syn::Expr::Path(path) = expr.clone() {
+                if path.path.segments.len() == 1 {
+                    let ident = &path.path.segments[0].ident;
+                    for var in self.reactive_vars.iter() {
+                        if var.name == *ident {
+                            // Found a state variable, set the corresponding flag
+                            self.flags |= var.flag_mask;
+                            // Replace with state accessed version
+                            *expr = syn::parse2(quote::quote! {
+                                state.#ident
+                            })
+                            .unwrap();
+                            break;
+                        }
+                    }
+                    for var in self.state_vars.iter() {
+                        if var.name == *ident {
+                            // Found a state variable, set the corresponding flag, & add dereference
+                            self.flags |= var.flag_mask;
+                            // Replace with dereferenced state accessed version
+                            *expr = syn::parse2(quote::quote! {
+                                *state.#ident
+                            })
+                            .unwrap();
+                            break;
+                        }
+                    }
+                }
+            }
+            syn::visit_mut::visit_expr_mut(self, expr);
+        }
+    }
+
+    let mut visitor = VarVisitor {
+        state_vars,
+        reactive_vars,
+        flags: 0,
+    };
+
+    visitor.visit_expr_mut(&mut expr);
+
+    (expr, visitor.flags)
+}
+
+/// Similar to transform_content_expr, but also keep list of which reactive variables are used
+pub fn transform_derived_expr(
+    expr: syn::Expr,
+    state_vars: &Vec<ReactiveVar>,
+    reactive_vars: &Vec<ReactiveVar>,
+) -> (syn::Expr, Vec<syn::Ident>) {
+    let mut used_vars = Vec::new();
+
+    struct VarVisitor<'a> {
+        state_vars: &'a Vec<ReactiveVar>,
+        reactive_vars: &'a Vec<ReactiveVar>,
+        used_vars: &'a mut Vec<syn::Ident>,
     }
 
     impl<'a, 'ast> syn::visit_mut::VisitMut for VarVisitor<'a> {
@@ -24,12 +87,40 @@ pub fn transform_content_expr(
                     let ident = &path.path.segments[0].ident;
                     for var in self.reactive_vars.iter() {
                         if var.name == *ident {
-                            // Found a state variable, set the corresponding flag, & add dereference
-                            self.flags |= var.flag_mask;
-                            // Replace with dereferenced version
+                            // Found a state variable, add to used vars
+                            if !self.used_vars.contains(ident) {
+                                self.used_vars.push(ident.clone());
+                            }
+                            // Replace with state accessed version (no dereference for non-state vars)
+                            *i = syn::parse2(quote::quote! {
+                                state.#ident
+                            })
+                            .unwrap();
+                            break;
+                        }
+                    }
+                    for var in self.state_vars.iter() {
+                        if var.name == *ident {
+                            // Found a state variable, add to used vars, & add dereference
+                            if !self.used_vars.contains(ident) {
+                                self.used_vars.push(ident.clone());
+                            }
+                            // Replace with dereferenced state accessed version
                             *i = syn::parse2(quote::quote! {
                                 *state.#ident
-                            }).unwrap();
+                            })
+                            .unwrap();
+                            break;
+                        }
+                    }
+                } else {
+                    // Check if the first segment is a reactive variable, if so add to used vars (handles dot notation case)
+                    let first_ident = &path.path.segments[0].ident;
+                    for var in self.reactive_vars.iter() {
+                        if var.name == *first_ident {
+                            if !self.used_vars.contains(first_ident) {
+                                self.used_vars.push(first_ident.clone());
+                            }
                         }
                     }
                 }
@@ -39,13 +130,15 @@ pub fn transform_content_expr(
     }
 
     let mut visitor = VarVisitor {
+        state_vars,
         reactive_vars,
-        flags: 0,
+        used_vars: &mut used_vars,
     };
 
-    visitor.visit_expr_mut(&mut expr);
+    let mut expr_mut = expr.clone();
+    visitor.visit_expr_mut(&mut expr_mut);
 
-    (expr, visitor.flags)
+    (expr_mut, used_vars)
 }
 
 /// Infer the item type of an iterable expression
@@ -71,7 +164,9 @@ pub fn infer_iter_item_type(
         syn::Expr::Path(expr_path) => {
             if let Some(ident) = expr_path.path.get_ident() {
                 // Check if it's a reactive variable and try to extract inner type
-                if let Some(rv) = reactive_vars.iter().find(|rv| rv.name == *ident) {
+                if let Some(rv) =
+                    reactive_vars.iter().find(|rv| rv.name == *ident)
+                {
                     return extract_iter_item_type(&rv.ty);
                 }
             }
@@ -86,7 +181,10 @@ pub fn infer_iter_item_type(
                     // Try to get the type from the receiver
                     if let syn::Expr::Path(expr_path) = &*method_call.receiver {
                         if let Some(ident) = expr_path.path.get_ident() {
-                            if let Some(rv) = reactive_vars.iter().find(|rv| rv.name == *ident) {
+                            if let Some(rv) = reactive_vars
+                                .iter()
+                                .find(|rv| rv.name == *ident)
+                            {
                                 return extract_iter_item_type(&rv.ty);
                             }
                         }
@@ -100,7 +198,10 @@ pub fn infer_iter_item_type(
                     // HashMap<K, V>.keys() -> K
                     if let syn::Expr::Path(expr_path) = &*method_call.receiver {
                         if let Some(ident) = expr_path.path.get_ident() {
-                            if let Some(rv) = reactive_vars.iter().find(|rv| rv.name == *ident) {
+                            if let Some(rv) = reactive_vars
+                                .iter()
+                                .find(|rv| rv.name == *ident)
+                            {
                                 return extract_map_key_type(&rv.ty);
                             }
                         }
@@ -111,7 +212,10 @@ pub fn infer_iter_item_type(
                     // HashMap<K, V>.values() -> V
                     if let syn::Expr::Path(expr_path) = &*method_call.receiver {
                         if let Some(ident) = expr_path.path.get_ident() {
-                            if let Some(rv) = reactive_vars.iter().find(|rv| rv.name == *ident) {
+                            if let Some(rv) = reactive_vars
+                                .iter()
+                                .find(|rv| rv.name == *ident)
+                            {
                                 return extract_map_value_type(&rv.ty);
                             }
                         }
@@ -120,7 +224,10 @@ pub fn infer_iter_item_type(
                 }
                 "enumerate" => {
                     // Recursively get inner type, wrap in tuple with usize
-                    let inner = infer_iter_item_type(&method_call.receiver, reactive_vars);
+                    let inner = infer_iter_item_type(
+                        &method_call.receiver,
+                        reactive_vars,
+                    );
                     let ty_str = format!("(usize, {})", quote::quote!(#inner));
                     syn::parse_str(&ty_str).unwrap()
                 }
@@ -133,10 +240,15 @@ pub fn infer_iter_item_type(
             if expr_macro.mac.path.is_ident("vec") {
                 // Try to parse first element to infer type
                 let tokens = expr_macro.mac.tokens.clone();
-                let parser = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated;
+                let parser = syn::punctuated::Punctuated::<
+                    syn::Expr,
+                    syn::Token![,],
+                >::parse_terminated;
                 if let Ok(exprs) = parser.parse2(tokens) {
                     if let Some(first) = exprs.first() {
-                        if let Some(ty) = infer_type_from_bound(first, reactive_vars) {
+                        if let Some(ty) =
+                            infer_type_from_bound(first, reactive_vars)
+                        {
                             return ty;
                         }
                     }
@@ -188,7 +300,9 @@ fn infer_type_from_bound(
         // Variable reference: check reactive vars for their type
         syn::Expr::Path(expr_path) => {
             if let Some(ident) = expr_path.path.get_ident() {
-                if let Some(rv) = reactive_vars.iter().find(|rv| rv.name == *ident) {
+                if let Some(rv) =
+                    reactive_vars.iter().find(|rv| rv.name == *ident)
+                {
                     return Some(rv.ty.clone());
                 }
             }
@@ -206,8 +320,12 @@ fn extract_iter_item_type(ty: &syn::Type) -> syn::Type {
             let type_name = segment.ident.to_string();
             match type_name.as_str() {
                 "Vec" | "HashSet" | "BTreeSet" | "VecDeque" | "LinkedList" => {
-                    if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                        if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
+                    if let syn::PathArguments::AngleBracketed(args) =
+                        &segment.arguments
+                    {
+                        if let Some(syn::GenericArgument::Type(inner_ty)) =
+                            args.args.first()
+                        {
                             return inner_ty.clone();
                         }
                     }
@@ -233,8 +351,12 @@ fn extract_map_key_type(ty: &syn::Type) -> syn::Type {
         if let Some(segment) = type_path.path.segments.last() {
             let type_name = segment.ident.to_string();
             if type_name == "HashMap" || type_name == "BTreeMap" {
-                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
-                    if let Some(syn::GenericArgument::Type(key_ty)) = args.args.first() {
+                if let syn::PathArguments::AngleBracketed(args) =
+                    &segment.arguments
+                {
+                    if let Some(syn::GenericArgument::Type(key_ty)) =
+                        args.args.first()
+                    {
                         return key_ty.clone();
                     }
                 }
@@ -250,10 +372,14 @@ fn extract_map_value_type(ty: &syn::Type) -> syn::Type {
         if let Some(segment) = type_path.path.segments.last() {
             let type_name = segment.ident.to_string();
             if type_name == "HashMap" || type_name == "BTreeMap" {
-                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                if let syn::PathArguments::AngleBracketed(args) =
+                    &segment.arguments
+                {
                     let mut iter = args.args.iter();
                     iter.next(); // Skip key type
-                    if let Some(syn::GenericArgument::Type(val_ty)) = iter.next() {
+                    if let Some(syn::GenericArgument::Type(val_ty)) =
+                        iter.next()
+                    {
                         return val_ty.clone();
                     }
                 }

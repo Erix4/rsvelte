@@ -1,6 +1,6 @@
 use quote::format_ident;
 
-use crate::transform::{each_block::EachVar, node::{Node, NodeType}, utils::{scoped_vars_as_args, scoped_vars_as_params}};
+use crate::transform::node::{Node, NodeType, each_block::EachVar, utils::*};
 
 pub fn get_if_element_functions(state_type: &syn::Ident, scoped_vars: Vec<EachVar>, node: &Node) -> proc_macro2::TokenStream {
     let mut functions = quote::quote! {};

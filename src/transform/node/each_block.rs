@@ -1,10 +1,7 @@
 use quote::format_ident;
 use syn::Ident;
 
-use crate::transform::{
-    node::{Node, NodeType},
-    utils::{get_tuple_type_for_nodes, scoped_vars_as_args, scoped_vars_as_params},
-};
+use crate::transform::node::{Node, NodeType, utils::*};
 
 /// A variable declared in an #each block, which represents the current item in the iteration and can be used in expressions inside the block
 #[derive(Clone)]
@@ -47,6 +44,7 @@ pub fn get_each_element_functions(
     // Create
     let name_root_create = format_ident!("{}_create", name_root);
     let create_func_call = format_ident!("{}_content_create", name_root);
+    let item_type = &each_var.ty;
     functions.extend(quote::quote! {
         fn #name_root_create(state: &#state_type #scoped_args) -> Result<EachElement, JsValue> {
             let window = web_sys::window().expect("no global window exists");
@@ -54,9 +52,9 @@ pub fn get_each_element_functions(
 
             let content = iter_expr.map(|item| {
                 let contents = #create_func_call(state)?;
-                Ok((hash_item(&item), contents))
+                Ok((hash_item(&item), contents, item))
             })
-            .collect::<Result<Vec<(u64, #tuple_type)>, JsValue>>()?;
+            .collect::<Result<Vec<(u64, #tuple_type, #item_type)>, JsValue>>()?;
 
             Ok(EachElement {
                 comment: document.create_comment(""),
@@ -69,9 +67,9 @@ pub fn get_each_element_functions(
     let name_root_mount = format_ident!("{}_mount", name_root);
     let mount_func_call = format_ident!("{}_content_mount", name_root);
     functions.extend(quote::quote! {
-        fn #name_root_mount(parent: &web_sys::Node, frag: &EachElement<#tuple_type>) -> Result<(), JsValue> {
+        fn #name_root_mount(parent: &web_sys::Node, frag: &EachElement<#tuple_type, #item_type>) -> Result<(), JsValue> {
             parent.append_child(&frag.comment)?;
-            for (_, contents) in &frag.content.iter() {
+            for (_, contents, _) in &frag.content.iter() {
                 #mount_func_call(parent, &frag.comment, contents)?;
             }
             Ok(())
@@ -83,12 +81,11 @@ pub fn get_each_element_functions(
     let mount_func_call = format_ident!("{}_content_mount", name_root);
     let update_func_call = format_ident!("{}_content_update", name_root);
     let unmount_func_call = format_ident!("{}_content_unmount", name_root);
-    let item_type = &each_var.ty;
     functions.extend(quote::quote! {
         fn #name_root_update(
             parent: &web_sys::Node,
             state: &#state_type,
-            frag: &mut EachElement<#tuple_type>,
+            frag: &mut EachElement<#tuple_type, #item_type>,
             flags: u64
             #scoped_args
         ) -> Result<(), JsValue> {
@@ -106,9 +103,8 @@ pub fn get_each_element_functions(
                 )?;
             }
 
-            for (_, contents) in &mut frag.content {
-                #update_func_call(parent, state, contents, flags)?;
-                // TODO: add scoped item here too (will always be same as when created)
+            for (_, contents, item) in &mut frag.content {
+                #update_func_call(parent, state, contents, flags #scoped_params, item)?;
             }
 
             Ok(())
@@ -119,8 +115,8 @@ pub fn get_each_element_functions(
     let name_root_unmount = format_ident!("{}_unmount", name_root);
     let unmount_func_call = format_ident!("{}_content_unmount", name_root);
     functions.extend(quote::quote! {
-        fn #name_root_unmount(frag: EachElement<#tuple_type>) {
-            for (_, contents) in frag.content {
+        fn #name_root_unmount(frag: EachElement<#tuple_type, #item_type>) -> Result<(), JsValue> {
+            for (_, contents, _) in frag.content {
                 #unmount_func_call(contents)?;
             }
             frag.comment.remove();

@@ -130,45 +130,6 @@ pub fn gen_expr(
     }
 }
 
-/// Analyzes the expression to find which reactive variables are used within it,
-/// making sure to avoid finding superstrings (i.e. finding "count" when "counter" is used)
-/// by using visiting the expression AST.
-fn get_reactive_vars_in_expr(
-    expr: &syn::Expr,
-    reactive_vars: &Vec<ReactiveVar>,
-) -> Vec<ReactiveVar> {
-    let mut vars_in_expr = Vec::new();
-    for var in reactive_vars {
-        let var_name = var.var.name.to_string();
-
-        // Use a visitor to traverse the expression AST
-        struct VarVisitor<'a> {
-            var_name: &'a str,
-            found: bool,
-        }
-
-        impl<'a, 'ast> syn::visit::Visit<'ast> for VarVisitor<'a> {
-            fn visit_ident(&mut self, ident: &'ast syn::Ident) {
-                if ident == self.var_name {
-                    self.found = true;
-                }
-            }
-        }
-
-        let mut visitor = VarVisitor {
-            var_name: &var_name,
-            found: false,
-        };
-        syn::visit::visit_expr(&mut visitor, expr);
-
-        if visitor.found {
-            vars_in_expr.push(var.clone());
-        }
-    }
-
-    vars_in_expr
-}
-
 #[derive(Clone)]
 pub struct AttrClosure {
     pub state_arg: bool,

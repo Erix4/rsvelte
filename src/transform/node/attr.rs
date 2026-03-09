@@ -11,8 +11,9 @@ use crate::{
 /// and populate flag masks for reactive expressions
 pub fn transform_attr(
     tag: Tag,
+    state_vars: &Vec<ReactiveVar>,
     reactive_vars: &Vec<ReactiveVar>,
-    state_funcs: &Vec<Ident>,
+    state_funcs: &Vec<&Ident>,
 ) -> (String, Vec<TagAttribute>) {
     let mut attrs_out = Vec::new();
 
@@ -30,11 +31,11 @@ pub fn transform_attr(
             }),
             AttrType::Expr(expr) => {
                 let (expr, flag_mask) =
-                    transform_content_expr(expr, reactive_vars);
+                    transform_content_expr(expr, state_vars, reactive_vars);
                 if flag_mask == 0 {
                     // No reactive vars, check if it's a function call to a state function
                     let attr_type = if let syn::Expr::Path(path) = expr {
-                        if state_funcs.iter().any(|v| path.path.is_ident(v)) {
+                        if state_funcs.iter().any(|v| path.path.is_ident(*v)) {
                             AttrType::Call(path.path.segments[0].ident.clone())
                         } else {
                             AttrType::Expr(syn::Expr::Path(path))

@@ -1,10 +1,12 @@
+use syn::ItemFn;
+
 use crate::{
     CompileOutput,
     parse::{
         StateVar,
         html_parse::{self, AttrType},
     },
-    transform::{EventHandler, PatchOp},
+    transform::{DerivedVar, EventHandler, Node},
     utils::CompileError,
 };
 
@@ -15,20 +17,18 @@ pub enum ElementArrayItem {
 }
 
 pub struct CodeGenContext {
-    pub element_array: Vec<ElementArrayItem>,
+    pub node_tree: Node,
     //pub state_vars (props, bindables, reactive, derived)
     
     //pub children_state (top level)
-    //pub fragment_state
+    //pub element/fragment_state
     
     //pub mount_code
-    //pub init_code
+    pub state_funcs: Vec<proc_macro2::TokenStream>,
     pub agnostic_code: Vec<proc_macro2::TokenStream>,
 
-    //pub event_handlers
     //pub bind_handlers
-    //pub derived_handlers
-    //pub patch_generators
+    pub derived_handlers: Vec<DerivedVar>
     //pub child_propagators
 
     //pub html_body

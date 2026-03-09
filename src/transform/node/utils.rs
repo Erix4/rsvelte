@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::transform::{each_block::EachVar, node::{Node, NodeType}};
+use crate::transform::node::{Node, NodeType, each_block::EachVar};
 
 pub fn map_to_update(
     update_map: HashMap<u64, proc_macro2::TokenStream>,

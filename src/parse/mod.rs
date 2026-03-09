@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read};
+use std::{fs::File, hash::{Hash, Hasher}, io::Read};
 
 use crate::utils::*;
 
@@ -6,9 +6,11 @@ pub mod html_parse;
 mod rs_parse;
 
 use html_parse::{TagType, read_closing_tag, read_element_with_tag};
-pub use rs_parse::{ScriptData, StateVar, Prop, gen_expr};
+pub use rs_parse::{ComponentImport, Prop, ScriptData, StateVar};
 
-pub fn get_all_components(path: &str) -> Result<Vec<(String, ComponentAST)>, CompileError> {
+pub fn get_all_components(
+    path: &str,
+) -> Result<Vec<(String, ComponentAST)>, CompileError> {
     let mut components = Vec::new();
     let mut paths_to_process = vec![path.to_string()];
     let mut seen_paths = std::collections::HashSet::new();
@@ -35,7 +37,8 @@ pub fn get_all_components(path: &str) -> Result<Vec<(String, ComponentAST)>, Com
                     .parent()
                     .unwrap()
                     .join(&import.path);
-                paths_to_process.push(import_path.to_str().unwrap().to_string());
+                paths_to_process
+                    .push(import_path.to_str().unwrap().to_string());
             }
         }
 
@@ -46,6 +49,8 @@ pub fn get_all_components(path: &str) -> Result<Vec<(String, ComponentAST)>, Com
 }
 
 pub struct ComponentAST {
+    pub id_hash: String, // Unique hash based on source path for this component, used for generating unique identifiers during codegen
+    pub source_path: String,
     pub body: html_parse::Element,
     pub script: Option<rs_parse::ScriptData>,
     pub style: Option<String>,
@@ -57,9 +62,16 @@ struct ComponentASTBuilder {
     style: Option<String>,
 }
 
-impl Into<ComponentAST> for ComponentASTBuilder {
-    fn into(self) -> ComponentAST {
+impl ComponentASTBuilder {
+    fn into(self, source_path: String) -> ComponentAST {
+        // Create unique hash string for this component
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        Hash::hash(&source_path, &mut hasher);
+        let id_hash = format!("{:x}", hasher.finish());
+
         ComponentAST {
+            id_hash,
+            source_path,
             body: self.body.expect("Component must have a body"),
             script: self.script,
             style: self.style,
@@ -89,7 +101,8 @@ pub fn parse(filepath: &str) -> Result<ComponentAST, CompileError> {
         if chars.peek().is_none() {
             break;
         }
-        let parent_elem = read_parent_elem(&mut chars, &mut coord, &mut id_counter)?;
+        let parent_elem =
+            read_parent_elem(&mut chars, &mut coord, &mut id_counter)?;
         match parent_elem {
             ParentElement::Script(script) => {
                 builder.script = Some(script);
@@ -103,7 +116,7 @@ pub fn parse(filepath: &str) -> Result<ComponentAST, CompileError> {
         }
     }
 
-    Ok(builder.into())
+    Ok(builder.into(filepath.to_string()))
 }
 
 enum ParentElement {
