@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::transform::node::{Node, NodeType, each_block::EachVar};
+use crate::transform::node::{Node, NodeType};
 
 pub fn map_to_update(
     update_map: HashMap<u64, proc_macro2::TokenStream>,
@@ -14,20 +14,6 @@ pub fn map_to_update(
         });
     }
     checks
-}
-
-pub fn get_tuple_type_for_nodes(nodes: &Vec<Node>) -> proc_macro2::TokenStream {
-    let types = nodes
-        .iter()
-        .map(|node| node.get_tuple_types())
-        .flatten()
-        .collect::<Vec<_>>();
-    if types.len() == 1 {
-        // Rust doesn't like tuples with one item, so we can just return the type itself in that case
-        types.into_iter().next().unwrap()
-    } else {
-        quote::quote! { (#(#types),*) }
-    }
 }
 
 pub fn get_content_accessor(
@@ -66,36 +52,11 @@ pub fn merge_into_hashmap(
         .or_insert(code);
 }
 
-/// Formats scoped variables as arguments to functions that create/mount/update #if and #each blocks
-/// NOTE: includes a leading comma if there are any scoped variables, so that it can be appended to the end of the state argument
-pub fn scoped_vars_as_args(
-    scoped_vars: &Vec<EachVar>,
-) -> proc_macro2::TokenStream {
-    if scoped_vars.is_empty() {
-        return quote::quote! {};
-    }
-    let args = scoped_vars.iter().map(|var| var.to_arg());
-    quote::quote! { , #(#args),* }
-}
-
-/// Like `scoped_vars_as_args` but for function parameters instead of arguments.
-/// This means it just returns the variable names without the types.
-/// NOTE: includes the leading comma, so it can be used directly in function signatures after the state parameter
-pub fn scoped_vars_as_params(
-    scoped_vars: &Vec<EachVar>,
-) -> proc_macro2::TokenStream {
-    if scoped_vars.is_empty() {
-        return quote::quote! {};
-    }
-    let params = scoped_vars.iter().map(|var| &var.name);
-    quote::quote! { , #(#params),* }
-}
-
 pub fn find_all_fragments(nodes: &Vec<Node>) -> Vec<&Node> {
     let mut fragments = Vec::new();
     for node in nodes {
         match &node.content {
-            NodeType::If(_, _, _, _) | NodeType::Each(_, _, _, _) => {
+            NodeType::If(_, _, _, _) | NodeType::Each(_, _, _, _, _) => {
                 fragments.push(node);
             }
             NodeType::Tag(_, _, children) => {
@@ -106,4 +67,18 @@ pub fn find_all_fragments(nodes: &Vec<Node>) -> Vec<&Node> {
         }
     }
     fragments
+}
+
+/// Converts a number to a string like "a", "b", ..., "z", "aa", "ab", etc.
+/// for generating field names for fragment structs
+pub fn num_to_letter(num: usize) -> String {
+    let mut result = String::new();
+    let mut n = num;
+    while n > 0 {
+        n -= 1; // Adjust for 0-indexing
+        let letter = (b'a' + (n % 26) as u8) as char;
+        result.insert(0, letter);
+        n /= 26;
+    }
+    result
 }

@@ -44,28 +44,32 @@ use crate::parse::get_all_components;
 /// ```
 /// Here, the `onclick` attribute name maps to `web_sys::MouseEvent` and the JS event type is `click`
 pub static EVENTS: &[(&str, &str, &str)] = &[
-    ("onclick", "web_sys::MouseEvent", "click"), // Svelte, web_sys type, JS
-    ("onmousemove", "web_sys::MouseEvent", "mousemove"),
-    ("onmousedown", "web_sys::MouseEvent", "mousedown"),
-    ("onmouseup", "web_sys::MouseEvent", "mouseup"),
-    ("ondblclick", "web_sys::MouseEvent", "dblclick"),
-    ("onkeydown", "web_sys::KeyboardEvent", "keydown"),
-    ("onkeyup", "web_sys::KeyboardEvent", "keyup"),
-    ("onkeypress", "web_sys::KeyboardEvent", "keypress"),
-    ("oninput", "web_sys::InputEvent", "input"),
-    ("onchange", "web_sys::Event", "change"),
-    ("onsubmit", "web_sys::Event", "submit"),
-    ("onfocus", "web_sys::FocusEvent", "focus"),
-    ("onblur", "web_sys::FocusEvent", "blur"),
-    ("onmouseover", "web_sys::MouseEvent", "mouseover"),
-    ("onmouseout", "web_sys::MouseEvent", "mouseout"),
-    ("onwheel", "web_sys::WheelEvent", "wheel"),
-    ("ontouchstart", "web_sys::TouchEvent", "touchstart"),
-    ("ontouchend", "web_sys::TouchEvent", "touchend"),
-    ("ontouchmove", "web_sys::TouchEvent", "touchmove"),
-    ("ontouchcancel", "web_sys::TouchEvent", "touchcancel"),
+    ("onclick", "MouseEvent", "click"), // Svelte, web_sys type, JS
+    ("onmousemove", "MouseEvent", "mousemove"),
+    ("onmousedown", "MouseEvent", "mousedown"),
+    ("onmouseup", "MouseEvent", "mouseup"),
+    ("ondblclick", "MouseEvent", "dblclick"),
+    ("onkeydown", "KeyboardEvent", "keydown"),
+    ("onkeyup", "KeyboardEvent", "keyup"),
+    ("onkeypress", "KeyboardEvent", "keypress"),
+    ("oninput", "InputEvent", "input"),
+    ("onchange", "Event", "change"),
+    ("onsubmit", "Event", "submit"),
+    ("onfocus", "FocusEvent", "focus"),
+    ("onblur", "FocusEvent", "blur"),
+    ("onmouseover", "MouseEvent", "mouseover"),
+    ("onmouseout", "MouseEvent", "mouseout"),
+    ("onwheel", "WheelEvent", "wheel"),
+    ("ontouchstart", "TouchEvent", "touchstart"),
+    ("ontouchend", "TouchEvent", "touchend"),
+    ("ontouchmove", "TouchEvent", "touchmove"),
+    ("ontouchcancel", "TouchEvent", "touchcancel"),
     // Add more event-function pairs as needed
 ];
+
+pub fn web_sys_qualify(event_str: &str) -> String {
+    format!("web_sys::{}", event_str)
+}
 
 pub struct CompileOutput {
     pub state_rs: String,
