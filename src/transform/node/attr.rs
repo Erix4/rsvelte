@@ -52,6 +52,20 @@ pub fn transform_attr(
                     })
                 }
             }
+            AttrType::Bind(var_name) => {
+                // Bindings are treated as reactive expressions that depend on the bound variable
+                let flag_mask = reactive_vars
+                    .iter()
+                    .find(|v| v.name == var_name)
+                    .map(|v| v.flag_mask)
+                    .unwrap_or(0);
+
+                attrs_out.push(TagAttribute {
+                    name,
+                    value: AttrType::Bind(var_name),
+                    flag_mask: Some(flag_mask),
+                })
+            }
             _ => {} // parsing does not generate calls
         }
     }

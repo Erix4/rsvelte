@@ -286,6 +286,7 @@ pub enum AttrType {
     Call(syn::Ident),
     Expr(syn::Expr),
     Closure(rs_parse::AttrClosure),
+    Bind(syn::Ident),
 }
 
 pub struct Tag {
@@ -309,6 +310,9 @@ impl Debug for Tag {
                 }
                 AttrType::Closure(_) => {
                     format!("{}=|...| {{ ... }}", name)
+                }
+                AttrType::Bind(var) => {
+                    format!("{}=bind({})", name, quote::ToTokens::to_token_stream(var))
                 }
             })
             .collect::<Vec<_>>()
@@ -394,6 +398,12 @@ fn parse_attr(
             chars.next();
             let value = read_attr_expression(chars, coord);
             expect_next(chars, '}', coord);
+
+            if attr_name.starts_with("bind:") {
+                let name = attr_name.trim_start_matches("bind:").to_string();
+                let var_name = syn::Ident::new(&name, proc_macro2::Span::call_site());
+                return (name, AttrType::Bind(var_name));
+            }
 
             let attr_is_event_type = EVENTS
                 .iter()

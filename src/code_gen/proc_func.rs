@@ -100,16 +100,29 @@ impl Node {
                     }
                 });
             }
-            NodeType::Comp(_, _) => {
+            NodeType::Comp(_, props) => {
                 // Proc child components, then update bindable props
                 let struct_field = &self.struct_field;
+                let mut bindable_updates = Vec::new();
+                for (prop, child_mask) in props {
+                    let prop_name = &prop.name;
+                    bindable_updates.push(quote::quote! {
+                        if child_bindable_flags & #child_mask != 0 {
+                            *state.#prop_name = self.#struct_field.state.#prop_name;
+                            // The mutate tracker will mark this dirty automatically
+                        }
+                    });
+                }
+
                 code.push(quote::quote! {
                     _ if target == #frag_field_idx => {
                         self.#struct_field.proc(state, scope, e, target_path)?;
                         let child_bindable_flags = DIRTY_FLAGS.load(SeqCst);
                         DIRTY_FLAGS.store(0, SeqCst);
 
-                        // TODO: extract child's mask for bindables
+                        #(#bindable_updates)*
+
+                        // TODO: function props
                     }
                 });
             }

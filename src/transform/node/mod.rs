@@ -126,6 +126,7 @@ impl Node {
                 NodeType::Expr(expr, flag_mask)
             }
             ContentType::Tag(tag, children) => {
+                // TODO: handle binds here
                 let (tag_name, attributes): (String, Vec<TagAttribute>) =
                     transform_attr(tag, state_vars, reactive_vars, state_funcs);
                 if tag_name.starts_with(char::is_uppercase) {
@@ -136,16 +137,16 @@ impl Node {
                         let attributes = if let Some(props) =
                             comp_ast.script.as_ref().map(|script| &script.props)
                         {
-                            attributes
-                                .into_iter()
-                                .map(|attr| {
-                                    let flag_mask = props
+                            let mut new_attributes = Vec::new();
+                            for attr in attributes {
+                                let child_flag_mask = props
                                         .iter()
                                         .find(|prop| prop.name == attr.name)
                                         .map(|prop| 1 << prop.flag_pos).expect("Component props must be defined in the component script");
-                                    (attr, flag_mask)
-                                })
-                                .collect()
+
+                                new_attributes.push((attr, child_flag_mask));
+                            }
+                            new_attributes
                         } else {
                             Vec::new()
                         };
@@ -236,7 +237,11 @@ impl Node {
                                 )
                             })
                             .collect(),
-                        name: format_ident!("C{}If{}ElseBranch", comp_id_hash, value.id),
+                        name: format_ident!(
+                            "C{}If{}ElseBranch",
+                            comp_id_hash,
+                            value.id
+                        ),
                     });
                 let enum_name =
                     format_ident!("C{}IfBranch{}", comp_id_hash, value.id);

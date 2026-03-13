@@ -15,6 +15,7 @@ mod derived;
 mod expr;
 mod func;
 mod node;
+mod state;
 
 pub struct ReactiveVar {
     name: syn::Ident,
@@ -188,8 +189,6 @@ fn transform_component(
         }
         state_funcs.push(new_func);
     }
-    // Generate event handling branches
-    // event type, target id, function or closure call
 
     // Create list of child component state to store in the component struct
 
