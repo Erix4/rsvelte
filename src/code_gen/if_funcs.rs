@@ -1,11 +1,11 @@
 use syn::Ident;
 
-use crate::transform::node::NodeIfBranch;
+use crate::transform::NodeIfBranch;
 
 pub fn get_new_func_if(
-    enum_name: Ident,
+    enum_name: &Ident,
     branches: &Vec<NodeIfBranch>,
-    else_branch: Option<Ident>,
+    else_branch: Option<&Ident>,
 ) -> proc_macro2::TokenStream {
     let mut if_branches = quote::quote! {};
     for (i, branch) in branches.iter().enumerate() {
@@ -105,6 +105,36 @@ pub fn get_unmount_func_if(
         fn unmount(&self) -> Result<(), JsValue> {
             match self {
                 #match_arms
+            }
+        }
+    }
+}
+
+pub fn get_branch_changed_func_if(if_mask: u64, branches: &Vec<NodeIfBranch>) -> proc_macro2::TokenStream {
+    let mut match_arms = Vec::new();
+    let mut else_condition = Vec::new();
+
+    for (i, branch) in branches.iter().enumerate() {
+        let branch_name = format!("Branch{}", i);
+        let condition = &branch.condition;
+        match_arms.push(quote::quote! {
+            Self::#branch_name(_) if #condition => false,
+        });
+        else_condition.push(quote::quote! { !(#condition) });
+    }
+    match_arms.push(quote::quote! {
+        Self::Else(_) if #(#else_condition)&&* => false,
+    });
+
+    quote::quote! {
+        fn branch_changed(&self, state: &Self::State, scope: Self::Scope<'_>, flags: u64) -> bool {
+            if flags & #if_mask != 0 {
+                match self {
+                    #(#match_arms)*
+                    _ => true,
+                }
+            } else {
+                false
             }
         }
     }

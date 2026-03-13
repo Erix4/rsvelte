@@ -6,11 +6,11 @@ pub mod html_parse;
 mod rs_parse;
 
 use html_parse::{TagType, read_closing_tag, read_element_with_tag};
-pub use rs_parse::{ComponentImport, Prop, ScriptData, StateVar};
+pub use rs_parse::{Prop, ScriptData, StateVar};
 
 pub fn get_all_components(
     path: &str,
-) -> Result<Vec<(String, ComponentAST)>, CompileError> {
+) -> Result<Vec<ComponentAST>, CompileError> {
     let mut components = Vec::new();
     let mut paths_to_process = vec![path.to_string()];
     let mut seen_paths = std::collections::HashSet::new();
@@ -42,7 +42,7 @@ pub fn get_all_components(
             }
         }
 
-        components.push((current_path, component_ast));
+        components.push(component_ast);
     }
 
     Ok(components)

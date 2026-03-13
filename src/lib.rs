@@ -73,7 +73,6 @@ pub fn web_sys_qualify(event_str: &str) -> String {
 
 pub struct CompileOutput {
     pub state_rs: String,
-    pub startup_js: String,
 }
 
 /// Main compile function
@@ -161,12 +160,10 @@ pub fn compile_to_wasm(filepath: &str, output_path: &str) -> Result<(), CompileE
 cfg_if::cfg_if! {
     if #[cfg(target_os="windows")] {
         const LIB_RS: &str = include_str!(r"static_files\lib.rs");
-        const PATCHES_JS: &str = include_str!(r"static_files\patches.js");
         const INDEX_HTML: &str = include_str!(r"static_files\index.html");
         const CARGO_TOML: &str = include_str!(r"static_files\Cargo.toml");
     } else if #[cfg(any(target_os="linux", target_os="macos"))] {
         const LIB_RS: &str = include_str!(r"static_files/lib.rs");
-        const PATCHES_JS: &str = include_str!(r"static_files/patches.js");
         const INDEX_HTML: &str = include_str!(r"static_files/index.html");
         const CARGO_TOML: &str = include_str!(r"static_files/Cargo.toml");
     }
@@ -199,7 +196,6 @@ pub fn setup_dir(output_path: &str) -> Result<(), CompileError> {
 
     // Copy static files from static_files/
     std::fs::write(format!("{}/src/lib.rs", output_path), LIB_RS)?;
-    std::fs::write(format!("{}/patches.js", output_path), PATCHES_JS)?;
     std::fs::write(format!("{}/index.html", output_path), INDEX_HTML)?;
     std::fs::write(format!("{}/Cargo.toml", output_path), CARGO_TOML)?;
     Ok(())
@@ -207,7 +203,6 @@ pub fn setup_dir(output_path: &str) -> Result<(), CompileError> {
 
 pub struct StaticFiles {
     pub lib_rs: String,
-    pub patches_js: String,
     pub index_html: String,
     pub cargo_toml: String,
 }
@@ -234,7 +229,6 @@ pub struct StaticFiles {
 pub fn get_static_files() -> StaticFiles {
     StaticFiles {
         lib_rs: LIB_RS.to_string(),
-        patches_js: PATCHES_JS.to_string(),
         index_html: INDEX_HTML.to_string(),
         cargo_toml: CARGO_TOML.to_string(),
     }

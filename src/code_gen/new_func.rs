@@ -1,17 +1,21 @@
-use crate::{EVENTS, parse::html_parse::AttrType, transform::{Node, node::{NodeType, scope::ScopeData}}};
+use crate::{
+    EVENTS, code_gen::scope::ScopeData, parse::html_parse::AttrType, transform::{Node, NodeType}
+};
 
-/// Generates the `new` function for fragments which are if branch or root
-pub fn get_new_func_generic(
+/// Generates the `new` function for root fragments
+pub fn get_new_func_root(
     nodes: &Vec<Node>,
     scope: &ScopeData,
-    target_path: Vec<u32>,
 ) -> proc_macro2::TokenStream {
-    get_new_func_ex(
-        nodes,
-        scope,
-        target_path,
-        quote::quote! { Self::Scope<'_> },
-    )
+    get_new_func_ex(nodes, scope, quote::quote! { () })
+}
+
+/// Generates the `new` function for if branch fragments
+pub fn get_new_func_if_branch(
+    nodes: &Vec<Node>,
+    scope: &ScopeData,
+) -> proc_macro2::TokenStream {
+    get_new_func_ex(nodes, scope, quote::quote! { Self::Scope<'_> })
 }
 
 /// Generates the `new` function for each block fragments
@@ -20,12 +24,10 @@ pub fn get_new_func_generic(
 pub fn get_new_func_each(
     nodes: &Vec<Node>,
     scope: &ScopeData,
-    target_path: Vec<u32>,
 ) -> proc_macro2::TokenStream {
     get_new_func_ex(
         nodes,
         scope,
-        target_path,
         quote::quote! { (Self::Scope<'_>, &Self::Item) },
     )
 }
@@ -33,7 +35,6 @@ pub fn get_new_func_each(
 fn get_new_func_ex(
     nodes: &Vec<Node>,
     scope: &ScopeData,
-    target_path: Vec<u32>,
     scope_type: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     let mut struct_fields = Vec::new();
@@ -42,13 +43,13 @@ fn get_new_func_ex(
     for node in nodes {
         struct_fields.extend(node.get_fields());
         creators.push(node.get_create_code(scope));
-        listeners.extend(node.get_listeners(&target_path));
+        listeners.extend(node.get_listeners());
     }
 
     let scope_destructor = scope.get_destructor();
 
     quote::quote! {
-        fn new(&self, state: &Self::State, scope: #scope_type) -> Result<Self, JsValue> {
+        fn new(&self, state: &Self::State, scope: #scope_type, current_path: &Vec<u32>) -> Result<Self, JsValue> {
             let window = web_sys::window().expect("no global window exists");
             let document = window.document().expect("no document on window exists");
 
@@ -77,10 +78,7 @@ impl Node {
     /// let d = node_4_create(&state)?;
     /// ```
     /// This is done statefully, using page state and scoped variables (for #each blocks)
-    fn get_create_code(
-        &self,
-        scope: &ScopeData,
-    ) -> proc_macro2::TokenStream {
+    fn get_create_code(&self, scope: &ScopeData) -> proc_macro2::TokenStream {
         let struct_field = &self.struct_field;
         match &self.content {
             NodeType::Text(text) => {
@@ -136,14 +134,11 @@ impl Node {
         }
     }
 
-    fn get_listeners(
-        &self,
-        target_path: &Vec<u32>,
-    ) -> Vec<proc_macro2::TokenStream> {
+    fn get_listeners(&self) -> Vec<proc_macro2::TokenStream> {
         match &self.content {
             NodeType::Tag(_, attributes, children) => {
                 let struct_field = &self.struct_field;
-                let tuple_idx = self.tuple_idx;
+                let frag_field_idx = self.frag_field_idx;
                 let mut listeners = Vec::new();
                 for attr in attributes {
                     if let Some((_, _, js_event_str)) = EVENTS
@@ -151,12 +146,12 @@ impl Node {
                         .find(|(svelte_event, _, _)| svelte_event == &attr.name)
                     {
                         listeners.push(quote::quote! {
-                            add_listener(&self.#struct_field, #js_event_str, vec![#(#target_path),* , #tuple_idx])?;
+                            add_listener(&self.#struct_field, #js_event_str, prepend_path(current_path, #frag_field_idx))?;
                         });
                     }
                 }
                 for child in children.iter() {
-                    listeners.extend(child.get_listeners(target_path));
+                    listeners.extend(child.get_listeners());
                 }
                 listeners
             }

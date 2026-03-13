@@ -4,14 +4,6 @@ use quote::format_ident;
 use syn::Ident;
 
 mod attr;
-mod fragment;
-mod if_funcs;
-mod mount_func;
-mod new_func;
-mod proc_func;
-mod scope;
-mod unmount_func;
-mod update_func;
 mod utils;
 
 use crate::{
@@ -26,8 +18,13 @@ use crate::{
     },
 };
 
-struct NodeIfBranch {
+pub struct NodeIfBranch {
     pub condition: syn::Expr,
+    pub contents: Vec<Node>,
+    pub name: Ident, // Name enum branch
+}
+
+pub struct NodeElseBranch {
     pub contents: Vec<Node>,
     pub name: Ident, // Name enum branch
 }
@@ -47,7 +44,7 @@ pub enum NodeType {
     Text(String),
     Expr(syn::Expr, u64), // Expression and its dirty flag mask
     Tag(String, Vec<TagAttribute>, Vec<Node>), // tag name, its attributes and its contents
-    If(Vec<NodeIfBranch>, Option<Vec<Node>>, Ident, u64), // if branches, else branch, enum name, expression dirty flag mask
+    If(Vec<NodeIfBranch>, Option<NodeElseBranch>, Ident, u64), // if branches, else branch, enum name, expression dirty flag mask
     Each(syn::Expr, EachVar, Vec<Node>, Ident, u64), // iterable expression, item var, contents, fragment name, expression dirty flag mask
     Comp(String, Vec<(TagAttribute, u64)>), // component name and its props & their child comp masks
 }
@@ -102,7 +99,7 @@ pub enum NodeType {
 ///   - Unmounting #each block content when it becomes inactive
 pub struct Node {
     pub id: u32,
-    pub tuple_idx: usize,
+    pub frag_field_idx: usize,
     pub struct_field: Ident,
     pub content: NodeType,
 }
@@ -111,16 +108,16 @@ impl Node {
     /// Converts an Element into a Node, assigning tuple indices and mount names as needed.
     pub fn from_element(
         value: Element,
-        tuple_idx_counter: &mut usize,
+        frag_field_idx_counter: &mut usize,
         state_vars: &Vec<ReactiveVar>,
         reactive_vars: &Vec<ReactiveVar>,
         state_funcs: &Vec<&Ident>,
         component_map: &HashMap<&String, &ComponentAST>,
         comp_id_hash: &String,
     ) -> Self {
-        let tuple_idx = *tuple_idx_counter;
-        *tuple_idx_counter += 1;
-        let struct_field = format_ident!("{}", num_to_letter(tuple_idx));
+        let frag_field_idx = *frag_field_idx_counter;
+        *frag_field_idx_counter += 1;
+        let struct_field = format_ident!("{}", num_to_letter(frag_field_idx));
         let content = match value.content {
             ContentType::Text(txt) => NodeType::Text(txt),
             ContentType::Expr(expr) => {
@@ -154,7 +151,7 @@ impl Node {
                         };
                         return Node {
                             id: value.id,
-                            tuple_idx,
+                            frag_field_idx,
                             struct_field,
                             content: NodeType::Comp(comp_name, attributes),
                         };
@@ -167,7 +164,7 @@ impl Node {
                     .map(|child| {
                         Node::from_element(
                             child,
-                            tuple_idx_counter,
+                            frag_field_idx_counter,
                             state_vars,
                             reactive_vars,
                             state_funcs,
@@ -192,7 +189,7 @@ impl Node {
                         flag_mask |= flags;
 
                         // Reset tuple index counter for branches so that they start at 0 and don't include parent nodes
-                        let mut branch_tuple_idx_counter = 0;
+                        let mut branch_frag_field_idx_counter = 0;
 
                         NodeIfBranch {
                             condition,
@@ -202,7 +199,7 @@ impl Node {
                                 .map(|child| {
                                     Node::from_element(
                                         child,
-                                        &mut branch_tuple_idx_counter,
+                                        &mut branch_frag_field_idx_counter,
                                         state_vars,
                                         reactive_vars,
                                         state_funcs,
@@ -211,30 +208,38 @@ impl Node {
                                     )
                                 })
                                 .collect(),
-                            name: format_ident!("Branch{}", idx),
+                            name: format_ident!(
+                                "C{}If{}Branch{}",
+                                comp_id_hash,
+                                value.id,
+                                idx
+                            ),
                         }
                     })
                     .collect();
 
                 // Reset tuple index counter for else branch so that it starts at 0 and doesn't include parent nodes
-                let mut else_tuple_idx_counter = 0;
-                let node_else_branch = else_branch.map(|else_contents| {
-                    else_contents
-                        .into_iter()
-                        .map(|child| {
-                            Node::from_element(
-                                child,
-                                &mut else_tuple_idx_counter,
-                                state_vars,
-                                reactive_vars,
-                                state_funcs,
-                                component_map,
-                                comp_id_hash,
-                            )
-                        })
-                        .collect()
-                });
-                let enum_name = format_ident!("C{}IfBranch{}", comp_id_hash, value.id);
+                let mut else_frag_field_idx_counter = 0;
+                let node_else_branch =
+                    else_branch.map(|else_contents| NodeElseBranch {
+                        contents: else_contents
+                            .into_iter()
+                            .map(|child| {
+                                Node::from_element(
+                                    child,
+                                    &mut else_frag_field_idx_counter,
+                                    state_vars,
+                                    reactive_vars,
+                                    state_funcs,
+                                    component_map,
+                                    comp_id_hash,
+                                )
+                            })
+                            .collect(),
+                        name: format_ident!("C{}If{}ElseBranch", comp_id_hash, value.id),
+                    });
+                let enum_name =
+                    format_ident!("C{}IfBranch{}", comp_id_hash, value.id);
                 NodeType::If(
                     node_if_branches,
                     node_else_branch,
@@ -254,13 +259,13 @@ impl Node {
                 );
 
                 // Reset tuple index counter for each content so that it starts at 0 and doesn't include parent nodes
-                let mut each_tuple_idx_counter = 0;
+                let mut each_frag_field_idx_counter = 0;
                 let content_nodes = children
                     .into_iter()
                     .map(|child| {
                         Node::from_element(
                             child,
-                            &mut each_tuple_idx_counter,
+                            &mut each_frag_field_idx_counter,
                             state_vars,
                             reactive_vars,
                             state_funcs,
@@ -269,13 +274,20 @@ impl Node {
                         )
                     })
                     .collect();
-                let frag_name = format_ident!("C{}EachFrag{}", comp_id_hash, value.id);
-                NodeType::Each(each_expr, each_var, content_nodes, frag_name, flags)
+                let frag_name =
+                    format_ident!("C{}EachFrag{}", comp_id_hash, value.id);
+                NodeType::Each(
+                    each_expr,
+                    each_var,
+                    content_nodes,
+                    frag_name,
+                    flags,
+                )
             }
         };
         Node {
             id: value.id,
-            tuple_idx,
+            frag_field_idx,
             struct_field,
             content,
         }

@@ -12,7 +12,7 @@ pub struct ScopeData<'a> {
 }
 
 impl ScopeData<'_> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         ScopeData {
             name: String::new(),
             ty: syn::parse_quote! { () },
@@ -38,7 +38,7 @@ impl ScopeData<'_> {
         }
     }
 
-    fn get_type(&self) -> syn::Type {
+    pub fn get_type(&self) -> syn::Type {
         if let Some(child) = &self.child {
             let child_type = child.get_type();
             let self_type = &self.ty;

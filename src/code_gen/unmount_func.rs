@@ -1,4 +1,4 @@
-use crate::transform::{Node, node::NodeType};
+use crate::transform::{Node, NodeType};
 
 /// Unmount function is the same for all fragment types
 pub fn get_unmount_func(nodes: &Vec<Node>) -> proc_macro2::TokenStream {

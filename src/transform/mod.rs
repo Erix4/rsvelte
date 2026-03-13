@@ -1,19 +1,18 @@
 use std::collections::HashMap;
 
-use syn::Token;
-
 pub use crate::transform::derived::DerivedVar;
-pub use crate::transform::node::Node;
+pub use crate::transform::node::{Node, NodeType, NodeIfBranch, NodeElseBranch, TagAttribute};
 use crate::{
-    code_gen::CodeGenContext, parse::{self, ComponentAST, html_parse::AttrType}, transform::func::{transform_func, validate_event_handler_args}, utils::{CompileError, generic_error}
+    code_gen::CodeGenContext,
+    parse::{self, ComponentAST},
+    transform::func::{transform_func, validate_event_handler_args},
+    utils::{CompileError, generic_error},
 };
 
 mod derived;
 mod expr;
-mod node;
-mod patches;
-mod event;
 mod func;
+mod node;
 
 struct ReactiveVar {
     name: syn::Ident,
@@ -48,15 +47,40 @@ pub fn transform(
     if components.is_empty() {
         return Err(generic_error("No components found in project"));
     }
-    let page_component = components.remove(0);
-    transform_component(page_component, &components)
-    // TODO: also transform child components and store their CodeGenContexts in the parent context for code generation
+
+    let mut comp_contexts = Vec::new();
+    for _ in 0..components.len() {
+        let comp = components.remove(0);
+        comp_contexts.push(transform_component(comp, &components)?);
+    }
+
+    Ok(CodeGenContext {
+        comps: comp_contexts
+    })
+}
+
+pub struct CompContext {
+    root_node: Node,
+    //pub state_vars (props, bindables, reactive, derived)
+
+    //pub children_state (top level)
+    //pub element/fragment_state
+
+    //pub mount_code
+    pub state_funcs: Vec<proc_macro2::TokenStream>,
+    pub agnostic_code: Vec<proc_macro2::TokenStream>,
+
+    //pub bind_handlers
+    pub derived_handlers: Vec<DerivedVar>, //pub child_propagators
+
+    //pub html_body
+    //pub styles: Option<String>,
 }
 
 fn transform_component(
     comp: ComponentAST,
     components: &Vec<ComponentAST>,
-) -> Result<CodeGenContext, CompileError> {
+) -> Result<CompContext, CompileError> {
     // Check that event attributes have matching functions,
     // and collect event handlers
     let html_events = comp.body.get_events();
@@ -109,7 +133,7 @@ fn transform_component(
     }
 
     // Transform html AST to Node tree
-    let mut tuple_idx_counter = 0;
+    let mut frag_field_idx_counter = 0;
     let state_funcs = script
         .state_functions
         .iter()
@@ -117,11 +141,12 @@ fn transform_component(
         .collect();
     let node_tree = Node::from_element(
         comp.body,
-        &mut tuple_idx_counter,
+        &mut frag_field_idx_counter,
         &state_vars,
         &reactive_vars,
         &state_funcs,
-        &component_map
+        &component_map,
+        &comp.id_hash,
     );
 
     // Build reactive var data & dependency graph for derived and bindables
@@ -169,8 +194,8 @@ fn transform_component(
 
     // TODO: overhaul importing system to use Rust syntax
 
-    Ok(CodeGenContext {
-        node_tree,
+    Ok(CompContext {
+        root_node: node_tree,
         derived_handlers,
         state_funcs,
         agnostic_code: script.agnostic_code,

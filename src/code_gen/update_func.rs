@@ -1,9 +1,5 @@
 use crate::{
-    parse::html_parse::AttrType,
-    transform::{
-        Node,
-        node::{NodeType, scope::ScopeData},
-    },
+    code_gen::scope::ScopeData, parse::html_parse::AttrType, transform::{Node, NodeType}
 };
 
 /// Generates the `update` function for root fragments
@@ -11,7 +7,7 @@ pub fn get_update_func_root(
     nodes: &Vec<Node>,
     scope: &ScopeData,
 ) -> proc_macro2::TokenStream {
-    get_update_func_ex(nodes, quote::quote! { Self::Scope<'_> }, scope, false)
+    get_update_func_ex(nodes, quote::quote! { () }, scope, false)
 }
 
 /// Generates the `update` function for if branch and each fragments

@@ -1,6 +1,6 @@
 use syn::Ident;
 
-use crate::transform::{Node, node::NodeType};
+use crate::transform::{Node, NodeType};
 
 /// Get mounting function for the root fragment
 pub fn get_mount_func_root(nodes: &Vec<Node>) -> proc_macro2::TokenStream {

@@ -1,20 +1,20 @@
 use syn::ItemFn;
 
 use crate::{
-    EVENTS,
-    parse::html_parse::AttrType,
-    transform::{
-        Node,
-        node::{
-            NodeType, TagAttribute,
-            scope::ScopeData,
-        },
-    },
-    web_sys_qualify,
+    EVENTS, code_gen::scope::ScopeData, parse::html_parse::AttrType, transform::{Node, NodeType, TagAttribute}, web_sys_qualify
 };
 
-/// Generates the `proc` function for fragments which are if branch or root
-pub fn get_proc_func_generic(
+/// Generates the `proc` function for root fragments
+pub fn get_proc_func_root(
+    nodes: &Vec<Node>,
+    state_funcs: &Vec<ItemFn>,
+    scope: &ScopeData,
+) -> proc_macro2::TokenStream {
+    get_proc_func_ex(nodes, quote::quote! { () }, state_funcs, scope)
+}
+
+/// Generates the `proc` function for if branch fragments
+pub fn get_proc_func_if_branch(
     nodes: &Vec<Node>,
     state_funcs: &Vec<ItemFn>,
     scope: &ScopeData,
@@ -71,7 +71,7 @@ impl Node {
         state_funcs: &Vec<ItemFn>,
     ) -> Vec<proc_macro2::TokenStream> {
         let mut code = Vec::new();
-        let tuple_idx = self.tuple_idx;
+        let frag_field_idx = self.frag_field_idx;
         match &self.content {
             NodeType::Tag(_, attributes, child_contents) => {
                 for attr in attributes {
@@ -80,7 +80,7 @@ impl Node {
                         && let Some(event_str_type) = get_js_event_str(attr)
                     {
                         code.push(quote::quote! {
-                            #event_str_type if target == #tuple_idx => {
+                            #event_str_type if target == #frag_field_idx => {
                                 #run_code
                             }
                         });
@@ -95,7 +95,7 @@ impl Node {
                 // Processing of #if and #each fragments is done inside functions, so we just call those functions here
                 let struct_field = &self.struct_field;
                 code.push(quote::quote! {
-                    _ if target == #tuple_idx => {
+                    _ if target == #frag_field_idx => {
                         self.#struct_field.proc(state, scope, e, target_path)?;
                     }
                 });
@@ -104,7 +104,7 @@ impl Node {
                 // Proc child components, then update bindable props
                 let struct_field = &self.struct_field;
                 code.push(quote::quote! {
-                    _ if target == #tuple_idx => {
+                    _ if target == #frag_field_idx => {
                         self.#struct_field.proc(state, scope, e, target_path)?;
                         let child_bindable_flags = DIRTY_FLAGS.load(SeqCst);
                         DIRTY_FLAGS.store(0, SeqCst);

@@ -54,11 +54,11 @@ struct Component<T: RootFragment> {
 }
 
 impl<T: RootFragment> Component<T> {
-    fn new() -> Result<Self, JsValue> {
+    fn new(current_path: &Vec<u32>) -> Result<Self, JsValue> {
         web_sys::console::log_1(&"Initializing Page component".into());
 
         let state = T::State::new();
-        let contents = T::new(&state, ())?;
+        let contents = T::new(&state, (), current_path)?;
         let mut new_page = Self { contents, state };
 
         DIRTY_FLAGS.store(u64::MAX, SeqCst); // mark all as dirty for initial render
@@ -123,7 +123,7 @@ impl<T: RootFragment> Component<T> {
 trait RootFragment {
     type State: ComponentState;
 
-    fn new(state: &Self::State, scope: ()) -> Result<Self, JsValue>
+    fn new(state: &Self::State, scope: (), current_path: &Vec<u32>) -> Result<Self, JsValue>
     where
         Self: Sized;
     fn mount(&self, add_method: impl AddMethod) -> Result<(), JsValue>;
@@ -142,7 +142,7 @@ trait GenericFragment {
     type State;
     type Scope<'a>: Copy; // this can implement Copy 'cause it's all references
 
-    fn new(state: &Self::State, scope: Self::Scope<'_>) -> Result<Self, JsValue>
+    fn new(state: &Self::State, scope: Self::Scope<'_>, current_path: &Vec<u32>) -> Result<Self, JsValue>
     where
         Self: Sized;
     fn mount(&self, parent: &Element, add_method: impl AddMethod) -> Result<(), JsValue>;
@@ -166,6 +166,7 @@ trait GenericFragment {
 struct IfElement<T: IfContentTrait> {
     pub comment: Comment,
     pub content_enum: T,
+    current_path: Vec<u32>,
 }
 
 impl<T> Clone for IfElement<T>
@@ -176,6 +177,7 @@ where
         Self {
             comment: self.comment.clone(),
             content_enum: self.content_enum.clone(),
+            current_path: self.current_path.clone(),
         }
     }
 }
@@ -186,7 +188,7 @@ trait IfContentTrait {
 
     // State, Scope (internal references in nested tuples)
     fn branch_changed(&self, state: &Self::State, _scope: Self::Scope<'_>, flags: u64) -> bool;
-    fn new(state: &Self::State, scope: Self::Scope<'_>) -> Result<Self, JsValue>
+    fn new(state: &Self::State, scope: Self::Scope<'_>, current_path: &Vec<u32>) -> Result<Self, JsValue>
     where
         Self: Sized;
     fn mount(&self, parent: &Element, add_method: impl AddMethod) -> Result<(), JsValue>;
@@ -211,13 +213,14 @@ impl<T: IfContentTrait> GenericFragment for IfElement<T> {
     type State = T::State;
     type Scope<'a> = T::Scope<'a>;
 
-    fn new(state: &Self::State, scope: Self::Scope<'_>) -> Result<Self, JsValue> {
+    fn new(state: &Self::State, scope: Self::Scope<'_>, current_path: &Vec<u32>) -> Result<Self, JsValue> {
         let window = web_sys::window().expect("no global window exists");
         let document = window.document().expect("no document on window exists");
 
         Ok(Self {
             comment: document.create_comment(""),
-            content_enum: T::new(state, scope)?,
+            content_enum: T::new(state, scope, current_path)?,
+            current_path: current_path.clone(),
         })
     }
 
@@ -249,7 +252,7 @@ impl<T: IfContentTrait> GenericFragment for IfElement<T> {
             self.content_enum.unmount();
 
             // Mount new content
-            self.content_enum = T::new(state, scope)?;
+            self.content_enum = T::new(state, scope, &self.current_path)?;
             self.content_enum
                 .mount(parent, comment_insert_closure(&self.comment, parent))?;
         }
@@ -267,6 +270,7 @@ impl<T: IfContentTrait> GenericFragment for IfElement<T> {
 struct EachElement<T: EachContentTrait> {
     pub comment: web_sys::Comment,
     pub content: Vec<(u64, T, T::Item)>, // (hash, DOM ref, item)
+    current_path: Vec<u32>,
 }
 
 /// Functions which the fragment inside an each block must implement to be used as content for an EachElement
@@ -279,7 +283,7 @@ trait EachContentTrait {
 
     fn generate(state: &Self::State, scope: Self::Scope<'_>, flags: u64)
         -> Option<Vec<Self::Item>>;
-    fn new(state: &Self::State, scope: (Self::Scope<'_>, &Self::Item)) -> Result<Self, JsValue>
+    fn new(state: &Self::State, scope: (Self::Scope<'_>, &Self::Item), current_path: &Vec<u32>) -> Result<Self, JsValue>
     where
         Self: Sized;
     fn mount(&self, parent: &Element, add_method: impl AddMethod) -> Result<(), JsValue>;
@@ -304,7 +308,7 @@ impl<T: EachContentTrait + Clone> GenericFragment for EachElement<T> {
     type State = T::State;
     type Scope<'a> = T::Scope<'a>;
 
-    fn new(state: &Self::State, scope: Self::Scope<'_>) -> Result<Self, JsValue> {
+    fn new(state: &Self::State, scope: Self::Scope<'_>, current_path: &Vec<u32>) -> Result<Self, JsValue> {
         let window = web_sys::window().expect("no global window exists");
         let document = window.document().expect("no document on window exists");
 
@@ -315,10 +319,11 @@ impl<T: EachContentTrait + Clone> GenericFragment for EachElement<T> {
                 .into_iter()
                 .map(|item| {
                     let hash = hash_item(&item);
-                    let content = T::new(state, (scope, &item)).expect("Failed to create content");
+                    let content = T::new(state, (scope, &item), current_path).expect("Failed to create content");
                     (hash, content, item)
                 })
                 .collect(),
+            current_path: current_path.clone(),
         })
     }
 
@@ -438,7 +443,7 @@ impl<T: EachContentTrait + Clone> GenericFragment for EachElement<T> {
                 } else {
                     // Mount new item
                     let new_item = takeable_new_items[new_index].take().unwrap();
-                    let new_contents = T::new(state, (scope, &new_item))?;
+                    let new_contents = T::new(state, (scope, &new_item), &self.current_path)?;
                     new_contents.mount(parent, comment_insert_closure(&self.comment, parent))?;
                     new_list.push((new_hashes[new_index], new_contents.clone(), new_item));
                 }
@@ -556,7 +561,7 @@ pub fn mount() -> Result<(), JsValue> {
         let document = window.document().expect("no document on window");
         let body = document.body().expect("document should have a body");
 
-        let new_page = Component::<PageRootFrag>::new()?;
+        let new_page = Component::<PageRootFrag>::new(&vec![])?;
         new_page.mount(child_append_closure(&body))?;
         *page.borrow_mut() = Some(new_page);
         web_sys::console::log_1(&"Page component mounted".into());
