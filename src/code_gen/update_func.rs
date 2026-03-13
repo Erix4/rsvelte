@@ -50,7 +50,7 @@ fn get_update_func_ex(
         .collect::<Vec<_>>();
 
     quote::quote! {
-        fn update(&mut self, #parent_arg state: &Self::State, scope: #scope_type, flags: u64) -> Result<(), JsValue> {
+        fn update(&mut self, #parent_arg state: &Self::State, scope: #scope_type, flags: u64) -> Result<(), crate::JsValue> {
             let #scope_destructor = scope;
 
             // update code

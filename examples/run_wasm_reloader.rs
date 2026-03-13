@@ -16,11 +16,6 @@ fn main() {
         .write_all(compile_out.state_rs.as_bytes())
         .unwrap();
 
-    let mut startup_js_file = File::create(format!("{}/startup.js", output_path)).unwrap();
-    startup_js_file
-        .write_all(compile_out.startup_js.as_bytes())
-        .unwrap();
-
     Command::new("wasm-reloader")
         .current_dir(format!("./{}", output_path))
         .status()

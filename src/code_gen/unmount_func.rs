@@ -8,7 +8,7 @@ pub fn get_unmount_func(nodes: &Vec<Node>) -> proc_macro2::TokenStream {
         .collect::<Vec<_>>();
 
     quote::quote! {
-        fn unmount(&mut self) {
+        fn unmount(&self) {
             #(#unmount_code)*
         }
     }

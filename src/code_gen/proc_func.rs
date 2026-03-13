@@ -50,7 +50,7 @@ fn get_proc_func_ex(
             scope: #scope_type,
             e: web_sys::Event,
             mut target_path: Vec<u32>
-        ) -> Result<(), JsValue> {
+        ) -> Result<(), crate::JsValue> {
             let target = target_path.pop().unwrap();
             let #scope_destructor = scope;
 

@@ -59,3 +59,15 @@ src/
 └── lib.rs
 Cargo.toml
 ```
+
+## Development
+
+To test the compiler for development, you can run one of the examples, like so:
+```bash
+cargo run --example show_output
+```
+
+You'll probably want to enable logging to see the compiler's progress:
+```bash
+RUST_LOG=info cargo run --example show_output
+```

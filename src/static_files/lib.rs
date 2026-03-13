@@ -1,4 +1,4 @@
-use crate::state::PageRootFrag;
+use crate::state::CPageRootFrag;
 use std::{
     cell::RefCell,
     ops::{Deref, DerefMut},
@@ -550,7 +550,7 @@ fn comment_insert_closure<'a>(comment: &'a Comment, parent: &'a Element) -> impl
 }
 
 thread_local! {
-    pub static PAGE: RefCell<Option<Component<PageRootFrag>>> = RefCell::new(None);
+    pub static PAGE: RefCell<Option<Component<CPageRootFrag>>> = RefCell::new(None);
 }
 
 #[wasm_bindgen]
@@ -561,7 +561,7 @@ pub fn mount() -> Result<(), JsValue> {
         let document = window.document().expect("no document on window");
         let body = document.body().expect("document should have a body");
 
-        let new_page = Component::<PageRootFrag>::new(&vec![])?;
+        let new_page = Component::<CPageRootFrag>::new(&vec![])?;
         new_page.mount(child_append_closure(&body))?;
         *page.borrow_mut() = Some(new_page);
         web_sys::console::log_1(&"Page component mounted".into());

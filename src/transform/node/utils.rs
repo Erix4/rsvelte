@@ -73,7 +73,7 @@ pub fn find_all_fragments(nodes: &Vec<Node>) -> Vec<&Node> {
 /// for generating field names for fragment structs
 pub fn num_to_letter(num: usize) -> String {
     let mut result = String::new();
-    let mut n = num;
+    let mut n = num + 1; // Start from 1 instead of 0 to get "a" for 0, "b" for 1, etc.
     while n > 0 {
         n -= 1; // Adjust for 0-indexing
         let letter = (b'a' + (n % 26) as u8) as char;

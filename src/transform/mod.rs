@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use quote::format_ident;
+
 pub use crate::transform::derived::DerivedVar;
 pub use crate::transform::node::{Node, NodeType, NodeIfBranch, NodeElseBranch, TagAttribute};
 use crate::{
@@ -14,7 +16,7 @@ mod expr;
 mod func;
 mod node;
 
-struct ReactiveVar {
+pub struct ReactiveVar {
     name: syn::Ident,
     ty: syn::Type,
     flag_mask: u64,
@@ -48,6 +50,8 @@ pub fn transform(
         return Err(generic_error("No components found in project"));
     }
 
+    let root_comp = components.remove(0);
+    let root_context = transform_component(root_comp, &components)?;
     let mut comp_contexts = Vec::new();
     for _ in 0..components.len() {
         let comp = components.remove(0);
@@ -55,19 +59,22 @@ pub fn transform(
     }
 
     Ok(CodeGenContext {
+        root_comp: root_context,
         comps: comp_contexts
     })
 }
 
 pub struct CompContext {
-    root_node: Node,
+    pub comp_id: String,
+    pub root_node: Node,
+    pub state_type: syn::Ident,
     //pub state_vars (props, bindables, reactive, derived)
 
     //pub children_state (top level)
     //pub element/fragment_state
 
     //pub mount_code
-    pub state_funcs: Vec<proc_macro2::TokenStream>,
+    pub state_funcs: Vec<syn::ItemFn>,
     pub agnostic_code: Vec<proc_macro2::TokenStream>,
 
     //pub bind_handlers
@@ -168,7 +175,7 @@ fn transform_component(
             fn init(&mut self) {}
         }
     };
-    let mut state_funcs = vec![init_code];
+    let mut state_funcs = Vec::new();
 
     // Find and transform event handlers (functions, callers, and closures), validating their arguments
     for func in script.state_functions {
@@ -179,7 +186,7 @@ fn transform_component(
                 new_func.sig.ident
             )));
         }
-        state_funcs.push(quote::quote! { #new_func });
+        state_funcs.push(new_func);
     }
     // Generate event handling branches
     // event type, target id, function or closure call
@@ -194,76 +201,14 @@ fn transform_component(
 
     // TODO: overhaul importing system to use Rust syntax
 
+    let state_type = format_ident!("C{}State", comp.id_hash);
+
     Ok(CompContext {
+        comp_id: comp.id_hash,
         root_node: node_tree,
+        state_type,
         derived_handlers,
         state_funcs,
         agnostic_code: script.agnostic_code,
     })
 }
-
-/*
-log::info!("Generating event handlers...");
-for (target_id, event_name, attr) in html_events {
-    let mut attr = attr.clone();
-    transform::find_function_calls(&mut attr, &script.functions);
-
-    let (closure, dirty_flags) =
-        parse::gen_expr(&attr, &script.functions, &script.reactive_vars)?;
-
-    let event_type = EVENTS
-        .iter()
-        .find(|(name, _, _)| *name == *event_name)
-        .expect(&format!(
-            "Event '{}' not found in EVENTS list",
-            event_name
-        ));
-    event_handlers.push(EventHandler {
-        event_type: syn::parse_str(event_type.1).unwrap(),
-        js_event_type: event_type.2.to_string(),
-        target_id: target_id,
-        closure,
-        dirty_flags,
-    });
-}
-
-log::info!("Extracting patch generators...");
-// Traverse body to find patch generators
-let patch_generators = patches::extract_generators(
-    &ast.body,
-    &script.non_reactive_vars,
-    &script.reactive_vars,
-);
-
-let mod_paths = Vec::new();
-for import in &script.imports {
-    if let syn::Item::Use(item_use) =
-        syn::parse2(import.clone()).map_err(|e| {
-            generic_error(&format!(
-                "Failed to parse import statement: {}",
-                e
-            ))
-        })?
-    {
-        for segment in item_use.tree.into_iter() {
-            if let syn::UseTree::Path(use_path) = segment {
-                mod_paths.push(use_path.ident.clone().into());
-            }
-        }
-    }
-}
-
-pub fn find_function_calls(attr: &mut AttrType, functions: &Vec<FuncData>) {
-    if let AttrType::Expr(expr) = attr.clone()
-        && let syn::Expr::Path(path) = expr
-        && path.path.segments.len() == 1
-    {
-        let func_name = &path.path.segments[0].ident;
-        for func in functions {
-            if func_name == &func.code.sig.ident {
-                // Replace with closure expression
-                *attr = AttrType::Call(func_name.clone());
-            }
-        }
-    }
-}*/

@@ -49,7 +49,7 @@ fn get_new_func_ex(
     let scope_destructor = scope.get_destructor();
 
     quote::quote! {
-        fn new(&self, state: &Self::State, scope: #scope_type, current_path: &Vec<u32>) -> Result<Self, JsValue> {
+        fn new(state: &Self::State, scope: #scope_type, current_path: &Vec<u32>) -> Result<Self, crate::JsValue> {
             let window = web_sys::window().expect("no global window exists");
             let document = window.document().expect("no document on window exists");
 

@@ -6,7 +6,7 @@
 /// Scope var name should already be sanitized when passed in,
 /// for example var `a` would be `a_scope`.
 pub struct ScopeData<'a> {
-    name: String,
+    name: syn::Ident,
     ty: syn::Type,
     child: Option<&'a ScopeData<'a>>,
 }
@@ -14,13 +14,13 @@ pub struct ScopeData<'a> {
 impl ScopeData<'_> {
     pub fn new() -> Self {
         ScopeData {
-            name: String::new(),
+            name: syn::Ident::new("root", proc_macro2::Span::call_site()),
             ty: syn::parse_quote! { () },
             child: None,
         }
     }
 
-    pub fn wrap(&self, name: String, ty: syn::Type) -> ScopeData {
+    pub fn wrap(&self, name: syn::Ident, ty: syn::Type) -> ScopeData {
         ScopeData {
             name,
             ty,
@@ -54,8 +54,7 @@ impl ScopeData<'_> {
     pub fn get_destructor(&self) -> proc_macro2::TokenStream {
         if let Some(child) = &self.child {
             let child_destructor = child.get_destructor();
-            let self_name =
-                syn::Ident::new(&self.name, proc_macro2::Span::call_site());
+            let self_name = &self.name;
             quote::quote! {
                 ( #child_destructor, #self_name )
             }

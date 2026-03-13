@@ -1,7 +1,9 @@
+use quote::format_ident;
 use syn::ItemFn;
 
 use crate::{
     CompileOutput,
+    code_gen::fragment::get_all_fragment_code,
     parse::{
         StateVar,
         html_parse::{self, AttrType},
@@ -26,6 +28,7 @@ pub enum ElementArrayItem {
 }
 
 pub struct CodeGenContext {
+    pub root_comp: CompContext,
     pub comps: Vec<CompContext>,
 }
 
@@ -33,10 +36,24 @@ pub fn code_gen(
     context: CodeGenContext,
 ) -> Result<CompileOutput, CompileError> {
     // Parse context for state.rs generation
+    let mut fragment_code = get_all_fragment_code(
+        "Page".to_string(),
+        &format_ident!("PageState"),
+        context.root_comp.root_node,
+        &context.root_comp.state_funcs,
+    );
+    fragment_code.extend(context.comps.into_iter().map(|comp| {
+        get_all_fragment_code(
+            comp.comp_id,
+            &comp.state_type,
+            comp.root_node,
+            &comp.state_funcs,
+        )
+    }));
 
     // Generate state.rs as tokens (to ensure valid syntax)
     let state_rs_tokens = quote::quote! {
-        //
+        #fragment_code
     };
 
     let state_rs_str = state_rs_tokens.to_string();

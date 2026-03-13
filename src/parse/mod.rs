@@ -63,19 +63,19 @@ struct ComponentASTBuilder {
 }
 
 impl ComponentASTBuilder {
-    fn into(self, source_path: String) -> ComponentAST {
+    fn into(self, source_path: String) -> Result<ComponentAST, CompileError> {
         // Create unique hash string for this component
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         Hash::hash(&source_path, &mut hasher);
         let id_hash = format!("{:x}", hasher.finish());
 
-        ComponentAST {
+        Ok(ComponentAST {
             id_hash,
             source_path,
-            body: self.body.expect("Component must have a body"),
+            body: self.body.ok_or_else(|| generic_error("No HTML body found in component"))?,
             script: self.script,
             style: self.style,
-        }
+        })
     }
 }
 
@@ -116,7 +116,7 @@ pub fn parse(filepath: &str) -> Result<ComponentAST, CompileError> {
         }
     }
 
-    Ok(builder.into(filepath.to_string()))
+    builder.into(filepath.to_string())
 }
 
 enum ParentElement {

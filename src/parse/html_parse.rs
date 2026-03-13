@@ -148,6 +148,8 @@ fn read_contents(
     coord: &mut Coord,
     id_counter: &mut u32,
 ) -> (Vec<Element>, ReadContentExitReason) {
+    read_until(chars, |ch| !ch.is_whitespace(), coord);
+
     let id = *id_counter;
     *id_counter += 1;
 

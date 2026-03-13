@@ -23,15 +23,15 @@ fn get_mount_func_ex(
     };
 
     let add_method = |struct_field: &Ident| {
-        quote::quote! { add_method(&self.#struct_field) }
+        quote::quote! { add_method(&self.#struct_field); }
     };
     let mounts = nodes
         .iter()
-        .map(|node| node.get_mount_code(&None, add_method))
+        .map(|node| node.get_mount_code(&None, &add_method))
         .collect::<Vec<_>>();
 
     quote::quote! {
-        fn mount(&self, #parent_arg add_method: impl AddMethod) -> Result<(), JsValue> {
+        fn mount(&self, #parent_arg add_method: impl crate::AddMethod) -> Result<(), crate::JsValue> {
             // mounts
             #(#mounts)*
 
@@ -50,14 +50,11 @@ impl Node {
     ///
     /// When calling from root level of a fragment, parent should be None and add_method
     /// should simple return `add_method(&self.#struct_field)`.
-    fn get_mount_code<F>(
+    fn get_mount_code(
         &self,
         parent: &Option<&Ident>,
-        add_method: F,
-    ) -> proc_macro2::TokenStream
-    where
-        F: Fn(&Ident) -> proc_macro2::TokenStream,
-    {
+        add_method: &dyn Fn(&Ident) -> proc_macro2::TokenStream,
+    ) -> proc_macro2::TokenStream {
         let struct_field = &self.struct_field;
         let add_line = add_method(&self.struct_field);
         match &self.content {
@@ -71,7 +68,7 @@ impl Node {
                     #add_line
                 };
 
-                let child_add_method = |child_struct_field: &Ident| {
+                let child_add_method= |child_struct_field: &Ident| {
                     quote::quote! {
                         self.#struct_field.append_child(&self.#child_struct_field)?;
                     }
@@ -79,7 +76,7 @@ impl Node {
 
                 for child in child_contents {
                     let child_code = child
-                        .get_mount_code(&Some(struct_field), child_add_method);
+                        .get_mount_code(&Some(struct_field), &child_add_method);
                     code.extend(child_code);
                 }
 

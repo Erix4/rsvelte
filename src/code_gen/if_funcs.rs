@@ -26,7 +26,7 @@ pub fn get_new_func_if(
     });
 
     quote::quote! {
-        fn new(&self, state: &Self::State, scope: Self::Scope<'_>) -> Result<Self, JsValue> {
+        fn new(&self, state: &Self::State, scope: Self::Scope<'_>) -> Result<Self, crate::JsValue> {
             Ok(
                 #if_branches
             )
@@ -44,7 +44,7 @@ pub fn get_mount_func_if(
         quote::quote! { mount(parent, add_method) },
     );
     quote::quote! {
-        fn mount(&self, parent: &web_sys::Element, add_method: impl AddMethod) -> Result<(), JsValue> {
+        fn mount(&self, parent: &web_sys::Element, add_method: impl crate::AddMethod) -> Result<(), crate::JsValue> {
             #match_arms
         }
     }
@@ -66,7 +66,7 @@ pub fn get_proc_func_if(
             scope: Self::Scope<'_>,
             e: web_sys::Event,
             target_path: Vec<u32
-        ) -> Result<(), JsValue> {
+        ) -> Result<(), crate::JsValue> {
             match self {
                 #match_arms
             }
@@ -84,7 +84,7 @@ pub fn get_update_func_if(
         quote::quote! { update(parent, state, scope, flags) },
     );
     quote::quote! {
-        fn update(&mut self, parent: &Element, state: &Self::State, scope: Self::Scope<'_>, flags: u64) -> Result<(), JsValue> {
+        fn update(&mut self, parent: &Element, state: &Self::State, scope: Self::Scope<'_>, flags: u64) -> Result<(), crate::JsValue> {
             match self {
                 #match_arms
             }
@@ -102,7 +102,7 @@ pub fn get_unmount_func_if(
         quote::quote! { unmount() },
     );
     quote::quote! {
-        fn unmount(&self) -> Result<(), JsValue> {
+        fn unmount(&self) -> Result<(), crate::JsValue> {
             match self {
                 #match_arms
             }

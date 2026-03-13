@@ -82,6 +82,7 @@ pub struct CompileOutput {
 /// * `Result<CompileOutput>` - Generated code strings
 pub fn compile(filepath: &str) -> Result<CompileOutput, CompileError> {
     // 1. Parse
+    info!("Parsing components...");
     let components = match get_all_components(filepath) {
         Ok(comps) => {
             info!("Parsing {}", "SUCCEEDED".green());

@@ -257,6 +257,7 @@ impl Node {
                     state_vars,
                     reactive_vars,
                 );
+                // TODO: detect if expression is iterable or vector & convert to vector if needed
 
                 // Reset tuple index counter for each content so that it starts at 0 and doesn't include parent nodes
                 let mut each_frag_field_idx_counter = 0;

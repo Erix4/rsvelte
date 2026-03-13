@@ -8,11 +8,11 @@ use crate::{
             get_proc_func_if, get_unmount_func_if, get_update_func_if,
         },
         mount_func::{get_mount_func_block, get_mount_func_root},
-        new_func::{get_new_func_if_branch, get_new_func_root},
-        proc_func::{get_proc_func_if_branch, get_proc_func_root},
+        new_func::{get_new_func_each, get_new_func_if_branch, get_new_func_root},
+        proc_func::{get_proc_func_each, get_proc_func_if_branch, get_proc_func_root},
         scope::ScopeData,
         unmount_func::get_unmount_func,
-        update_func::{get_update_func_block, get_update_func_root},
+        update_func::{get_update_func_block, get_update_func_each, get_update_func_root},
     },
     transform::{Node, NodeElseBranch, NodeIfBranch, NodeType},
 };
@@ -105,8 +105,24 @@ impl Node {
                 ));
                 code
             }
-            NodeType::Each(_, _, nodes, _, _) => {
-                todo!()
+            NodeType::Each(expr, each_var, nodes, struct_name, mask) => {
+                let mut code = Vec::new();
+                code.push(get_each_block_fragment(
+                    struct_name,
+                    nodes,
+                    &each_var.ty,
+                    &scope.wrap(each_var.name.clone(), each_var.ty.clone()),
+                    state_type,
+                    *mask,
+                    expr,
+                    state_funcs,
+                ));
+                for node in nodes {
+                    let mut child_code =
+                        node.get_fragments(state_type, scope, state_funcs);
+                    code.append(&mut child_code);
+                }
+                code
             }
             // Other nodes cannot contain fragments, so we just return an empty vector
             _ => Vec::new(),
@@ -130,9 +146,9 @@ fn get_root_fragment(
     let unmount_func = get_unmount_func(root_node_vec);
 
     quote::quote! {
-        #struct_decl
+        pub #struct_decl
 
-        impl RootFragment for #frag_name {
+        impl crate::RootFragment for #frag_name {
             type State = #state_name;
 
             #new_func
@@ -184,7 +200,7 @@ fn get_if_enum_fragment(
             #else_enum_branch
         }
 
-        impl IfContentTrait for #enum_name {
+        impl crate::IfContentTrait for #enum_name {
             type Scope<'a> = #scope_type;
             type State = #state_type;
 
@@ -230,6 +246,45 @@ fn get_if_branch_fragment(
     }
 }
 
+fn get_each_block_fragment(
+    struct_name: &Ident,
+    nodes: &Vec<Node>,
+    item_type: &syn::Type,
+    scope: &ScopeData,
+    state_type: &Ident,
+    mask: u64,
+    expr: &syn::Expr,
+    state_funcs: &Vec<ItemFn>
+) -> proc_macro2::TokenStream {
+    let struct_decl = get_struct_declaration(struct_name, nodes);
+    let scope_type = scope.get_type();
+
+    let generate_func =
+        get_generate_func_each(mask, expr);
+    let new_func = get_new_func_each(nodes, scope);
+    let mount_func = get_mount_func_block(nodes);
+    let proc_func = get_proc_func_each(nodes, state_funcs, scope);
+    let update_func = get_update_func_each(nodes, scope);
+    let unmount_func = get_unmount_func(nodes);
+
+    quote::quote! {
+        #struct_decl
+
+        impl crate::EachContentTrait for #struct_name {
+            type Item = #item_type;
+            type Scope<'a> = #scope_type;
+            type State = #state_type;
+
+            #generate_func
+            #new_func
+            #mount_func
+            #proc_func
+            #update_func
+            #unmount_func
+        }
+    }
+}
+
 fn get_struct_declaration(
     frag_name: &Ident,
     nodes: &Vec<Node>,
@@ -245,6 +300,21 @@ fn get_struct_declaration(
     quote::quote! {
         struct #frag_name {
             #(#struct_field_declarations),*
+        }
+    }
+}
+
+fn get_generate_func_each(
+    mask: u64,
+    expr: &syn::Expr,
+) -> proc_macro2::TokenStream {
+    quote::quote! {
+        fn generate(state: &Self::State, scope: Self::Scope<'_>, flags: u64) -> Option<Vec<Self::Item>> {
+            if flags & #mask != 0 {
+                Some(#expr)
+            } else {
+                None
+            }
         }
     }
 }

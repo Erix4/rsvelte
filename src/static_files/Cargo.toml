@@ -11,4 +11,17 @@ lazy_static = "1.5.0"
 serde = "1.0.228"
 serde-wasm-bindgen = "0.6.5"
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3.83", features = ["Event", "InputEvent", "MouseEvent"] }
+web-sys = { version = "0.3.83", features = [
+    "Event",
+    "Comment",
+    "Node",
+    "Text",
+    "InputEvent",
+    "MouseEvent",
+    "console",
+    "Window",
+    "Location",
+    "History",
+    "Document",
+    "HtmlElement",
+] }

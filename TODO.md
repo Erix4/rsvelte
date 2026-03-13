@@ -1,0 +1,5 @@
+- fix each diffing to minimize middle batch usage
+- allow multiple top-level tags in components
+- add snippet rendering
+- add {@render children} for rendering children in components
+- add filesystem router
