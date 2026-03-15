@@ -1,5 +1,8 @@
 use crate::{
-    EVENTS, code_gen::scope::ScopeData, parse::html_parse::AttrType, transform::{Node, NodeType}
+    EVENTS,
+    code_gen::scope::ScopeData,
+    parse::html_parse::AttrType,
+    transform::{Node, NodeType},
 };
 
 /// Generates the `new` function for root fragments
@@ -117,12 +120,12 @@ impl Node {
             // Creation of #if and #each fragments is done inside functions
             NodeType::If(_, _, _, _) => {
                 quote::quote! {
-                    let #struct_field = IfElement::new(state, scope)?;
+                    let #struct_field = crate::IfElement::new(state, scope, current_path)?;
                 }
             }
             NodeType::Each(_, _, _, _, _) => {
                 quote::quote! {
-                    let #struct_field = EachElement::new(state, scope)?;
+                    let #struct_field = EachElement::new(state, scope, current_path)?;
                 }
             }
             NodeType::Comp(comp_name, _) => {
@@ -138,7 +141,7 @@ impl Node {
         match &self.content {
             NodeType::Tag(_, attributes, children) => {
                 let struct_field = &self.struct_field;
-                let frag_field_idx = self.frag_field_idx;
+                let frag_field_idx = self.frag_field_idx as u32;
                 let mut listeners = Vec::new();
                 for attr in attributes {
                     if let Some((_, _, js_event_str)) = EVENTS
@@ -146,7 +149,7 @@ impl Node {
                         .find(|(svelte_event, _, _)| svelte_event == &attr.name)
                     {
                         listeners.push(quote::quote! {
-                            add_listener(&self.#struct_field, #js_event_str, prepend_path(current_path, #frag_field_idx))?;
+                            crate::add_listener(&#struct_field, #js_event_str, crate::prepend_path(current_path, #frag_field_idx))?;
                         });
                     }
                 }

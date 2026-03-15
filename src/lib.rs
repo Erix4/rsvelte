@@ -22,9 +22,9 @@
 //! </div>
 //! ```
 
+mod code_gen;
 mod parse;
 mod transform;
-mod code_gen;
 mod utils;
 
 use colored::Colorize;
@@ -120,9 +120,12 @@ pub fn compile(filepath: &str) -> Result<CompileOutput, CompileError> {
 }
 
 /// Compile .rsvelte file to WebAssembly module in provided output directory
-/// 
-/// 
-pub fn compile_to_wasm(filepath: &str, output_path: &str) -> Result<(), CompileError> {
+///
+///
+pub fn compile_to_wasm(
+    filepath: &str,
+    output_path: &str,
+) -> Result<(), CompileError> {
     let compile_out = compile(filepath)?;
 
     let temp_dir: TempDir = TempDir::new("rs_output")?;
@@ -188,17 +191,37 @@ cfg_if::cfg_if! {
 pub fn setup_dir(output_path: &str) -> Result<(), CompileError> {
     // Create output directory structure (delete if exists)
     let output_as_path = std::path::Path::new(output_path);
-    if output_as_path.exists() {
-        std::fs::remove_dir_all(output_as_path)?;
+    if !output_as_path.exists() {
+        return Err(generic_error(&format!(
+            "Output path '{}' does not exist",
+            output_path
+        )));
     }
-    std::fs::create_dir_all(output_as_path)?;
-    std::fs::create_dir(output_as_path.join("src"))?;
-    std::fs::create_dir(output_as_path.join("pkg"))?;
+
+    if !output_as_path.join("src").exists() {
+        std::fs::create_dir(output_as_path.join("src"))?;
+    }
+    if !output_as_path.join("pkg").exists() {
+        std::fs::create_dir(output_as_path.join("pkg"))?;
+    }
 
     // Copy static files from static_files/
     std::fs::write(format!("{}/src/lib.rs", output_path), LIB_RS)?;
     std::fs::write(format!("{}/index.html", output_path), INDEX_HTML)?;
     std::fs::write(format!("{}/Cargo.toml", output_path), CARGO_TOML)?;
+    Ok(())
+}
+
+/// Check if the given path islready \
+pub fn setup_dir_force(output_path: &str) -> Result<(), CompileError> {
+    let output_as_path = std::path::Path::new(output_path);
+    if output_as_path.exists() {
+        std::fs::remove_dir_all(output_as_path)?;
+    }
+    std::fs::create_dir_all(output_as_path)?;
+
+    setup_dir(output_path)?;
+
     Ok(())
 }
 

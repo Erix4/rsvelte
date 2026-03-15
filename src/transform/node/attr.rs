@@ -15,6 +15,7 @@ pub fn transform_attr(
     reactive_vars: &Vec<ReactiveVar>,
     state_funcs: &Vec<&Ident>,
 ) -> (String, Vec<TagAttribute>) {
+    log::info!("transforming tag <{}>", tag.name);
     let mut attrs_out = Vec::new();
 
     for (name, attr) in tag.attributes {
@@ -24,12 +25,16 @@ pub fn transform_attr(
                 value: AttrType::Str(str),
                 flag_mask: None,
             }),
-            AttrType::Closure(closure) => attrs_out.push(TagAttribute {
-                name,
-                value: AttrType::Closure(closure),
-                flag_mask: None,
-            }),
+            AttrType::Closure(closure) => {
+                //
+                attrs_out.push(TagAttribute {
+                    name,
+                    value: AttrType::Closure(closure),
+                    flag_mask: None,
+                })
+            }
             AttrType::Expr(expr) => {
+                log::info!("transforming expression for {}", name);
                 let (expr, flag_mask) =
                     transform_content_expr(expr, state_vars, reactive_vars);
                 if flag_mask == 0 {
@@ -44,10 +49,17 @@ pub fn transform_attr(
                         AttrType::Expr(expr)
                     };
 
-                    // Dynamic expression, needs to be updated in patch function
+                    // Static expression, only set on create
                     attrs_out.push(TagAttribute {
                         name,
                         value: attr_type,
+                        flag_mask: None,
+                    });
+                } else {
+                    // Dynamic expression, needs to be updated in proc function
+                    attrs_out.push(TagAttribute {
+                        name,
+                        value: AttrType::Expr(expr),
                         flag_mask: Some(flag_mask),
                     })
                 }

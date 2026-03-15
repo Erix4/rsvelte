@@ -1,42 +1,61 @@
 use syn::Ident;
 
-use crate::parse::ScriptData;
+use crate::{parse::ScriptData, transform::DerivedVar};
 
-fn get_state_code(state_type: &Ident, scrip_data: &ScriptData) -> proc_macro2::TokenStream {
-    let props = scrip_data.props.iter().map(|prop| {
-        let name = &prop.name;
-        let ty = &prop.ty;
-        quote::quote! {
-            #name: #ty,
-        }
-    });
+pub fn get_state_code_getter(
+    script_data: &ScriptData,
+    derived: &Vec<DerivedVar>,
+) -> Box<dyn Fn(&Ident) -> proc_macro2::TokenStream> {
+    let props = script_data
+        .props
+        .iter()
+        .map(|prop| {
+            let name = &prop.name;
+            let ty = &prop.ty;
+            quote::quote! {
+                #name: #ty,
+            }
+        })
+        .collect::<Vec<proc_macro2::TokenStream>>();
 
-    let bindable_props = scrip_data.bindable_props.iter().map(|prop| {
-        let name = &prop.name;
-        let ty = &prop.ty;
-        quote::quote! {
-            #name: #ty,
-        }
-    });
+    let bindable_props = script_data
+        .bindable_props
+        .iter()
+        .map(|prop| {
+            let name = &prop.name;
+            let ty = &prop.ty;
+            quote::quote! {
+                #name: #ty,
+            }
+        })
+        .collect::<Vec<proc_macro2::TokenStream>>();
 
-    let state_vars = scrip_data.state_vars.iter().map(|var| {
-        let name = &var.name;
-        let ty = &var.ty;
-        quote::quote! {
-            #name: crate::MutateTracker<#ty>,
-        }
-    });
+    let state_vars = script_data
+        .state_vars
+        .iter()
+        .map(|var| {
+            let name = &var.name;
+            let ty = &var.ty;
+            quote::quote! {
+                #name: crate::MutateTracker<#ty>,
+            }
+        })
+        .collect::<Vec<proc_macro2::TokenStream>>();
 
-    let derived_vars = scrip_data.derived_vars.iter().map(|var| {
-        let name = &var.name;
-        let ty = &var.ty;
-        quote::quote! {
-            #name: #ty,
-        }
-    });
+    let derived_vars = script_data
+        .derived_vars
+        .iter()
+        .map(|var| {
+            let name = &var.name;
+            let ty = &var.ty;
+            quote::quote! {
+                #name: #ty,
+            }
+        })
+        .collect::<Vec<proc_macro2::TokenStream>>();
 
-    let user_funcs = &scrip_data.state_functions;
-    let init_body = if let Some(init_func) = &scrip_data.init_func {
+    let user_funcs = script_data.state_functions.clone();
+    let init_body = if let Some(init_func) = &script_data.init_func {
         let block = &init_func.block;
         quote::quote! {
            #block
@@ -45,28 +64,102 @@ fn get_state_code(state_type: &Ident, scrip_data: &ScriptData) -> proc_macro2::T
         quote::quote! {}
     };
 
-    quote::quote! {
-        pub struct #state_type {
-            #(#props)*
-            #(#bindable_props)*
+    let constructor = get_state_constructor(script_data);
 
-            #(#state_vars)*
+    let derived_update_code = derived
+        .iter()
+        .map(|var| var.to_code())
+        .collect::<Vec<proc_macro2::TokenStream>>();
 
-            #(#derived_vars)*
-        }
+    let state_struct_body = quote::quote! {
+        #(#props)*
+        #(#bindable_props)*
 
-        impl ComponentState for #state_type {
-            fn init(&mut self) {
-                #init_body
+        #(#state_vars)*
+
+        #(#derived_vars)*
+    };
+
+    let closure = move |state_type: &Ident| {
+        quote::quote! {
+            pub struct #state_type {
+                #state_struct_body
             }
 
-            // TODO: new func
+            impl crate::ComponentState for #state_type {
+                fn init(&mut self) {
+                    #init_body
+                }
 
-            // TODO: update-derived
-        }
+                fn new() -> Self {
+                    Self {
+                        #constructor
+                    }
+                }
 
-        impl #state_type {
-            #(#user_funcs)*
+                fn update_derived(&mut self) {
+                    #(#derived_update_code)*
+                }
+            }
+
+            impl #state_type {
+                #(#user_funcs)*
+            }
         }
+    };
+
+    Box::new(closure)
+}
+
+fn get_state_constructor(script_data: &ScriptData) -> proc_macro2::TokenStream {
+    let prop_constructors = script_data.props.iter().map(|prop| {
+        let name = &prop.name;
+        if let Some(default) = &prop.default {
+            let default_expr = &default;
+            quote::quote! {
+                #name: #default_expr,
+            }
+        } else {
+            quote::quote! {
+                #name: Default::default(),
+            }
+        }
+    });
+    let bindable_prop_constructors =
+        script_data.bindable_props.iter().map(|prop| {
+            let name = &prop.name;
+            if let Some(default) = &prop.default {
+                let default_expr = &default;
+                quote::quote! {
+                    #name: #default_expr,
+                }
+            } else {
+                quote::quote! {
+                    #name: Default::default(),
+                }
+            }
+        });
+
+    let state_var_constructors = script_data.state_vars.iter().map(|var| {
+        let name = &var.name;
+        let default_expr = &var.default;
+        quote::quote! {
+            #name: crate::MutateTracker::new(#default_expr),
+        }
+    });
+
+    let derived_var_constructors = script_data.derived_vars.iter().map(|var| {
+        let name = &var.name;
+        let default_expr = &var.default;
+        quote::quote! {
+            #name: #default_expr,
+        }
+    });
+
+    quote::quote! {
+        #(#prop_constructors)*
+        #(#bindable_prop_constructors)*
+        #(#state_var_constructors)*
+        #(#derived_var_constructors)*
     }
 }

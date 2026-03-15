@@ -1,3 +1,17 @@
+<script>
+    struct $state {
+        counter = $state(0),
+    }
+</script>
+
 <div>
-    Hello world!
+    <button onclick={|| counter += 1}>Increment</button>
+    <p>
+        Hello world!
+        {#if counter > 5}
+            <p>Bye!</p>
+        {:else}
+            <p>Hi!</p>
+        {/if}
+    </p>
 </div>

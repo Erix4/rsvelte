@@ -4,7 +4,7 @@ use crate::parse::html_parse::AttrType;
 
 #[derive(Clone)]
 pub struct AttrClosure {
-    pub event_arg: Option<syn::Type>,
+    pub event_arg: Option<(syn::PatIdent, syn::Type)>,
     pub body: syn::Expr,
 }
 
@@ -42,10 +42,14 @@ pub fn parse_attr_expression(
                 }
                 event_arg = if let Ok(FnArg::Typed(arg)) =
                     syn::parse_str::<syn::FnArg>(arg)
+                    && let syn::Pat::Ident(ident) = *arg.pat
                 {
-                    Some(*arg.ty)
+                    Some((ident, *arg.ty))
                 } else {
-                    Some(syn::parse2(quote::quote! {web_sys::Event})?)
+                    Some((
+                        syn::parse2(quote::quote! {#arg})?,
+                        syn::parse2(quote::quote! {web_sys::Event})?,
+                    ))
                 }
             } else {
                 return Err(syn::Error::new(

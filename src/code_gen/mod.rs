@@ -1,15 +1,8 @@
 use quote::format_ident;
-use syn::ItemFn;
 
 use crate::{
-    CompileOutput,
-    code_gen::fragment::get_all_fragment_code,
-    parse::{
-        StateVar,
-        html_parse::{self, AttrType},
-    },
-    transform::{CompContext, DerivedVar, Node},
-    utils::CompileError,
+    CompileOutput, code_gen::fragment::get_all_fragment_code,
+    transform::CompContext, utils::CompileError,
 };
 
 mod fragment;
@@ -36,23 +29,30 @@ pub fn code_gen(
     context: CodeGenContext,
 ) -> Result<CompileOutput, CompileError> {
     // Parse context for state.rs generation
-    let mut fragment_code = get_all_fragment_code(
+    let mut fragment_code =
+        (context.root_comp.state_code_getter)(&format_ident!("PageState"));
+    fragment_code.extend(get_all_fragment_code(
         "Page".to_string(),
         &format_ident!("PageState"),
         context.root_comp.root_node,
         &context.root_comp.state_funcs,
-    );
+    ));
     fragment_code.extend(context.comps.into_iter().map(|comp| {
-        get_all_fragment_code(
+        let mut code = (comp.state_code_getter)(&comp.state_type);
+        code.extend(get_all_fragment_code(
             comp.comp_id,
             &comp.state_type,
             comp.root_node,
             &comp.state_funcs,
-        )
+        ));
+        code
     }));
 
     // Generate state.rs as tokens (to ensure valid syntax)
     let state_rs_tokens = quote::quote! {
+        use crate::GenericFragment;
+        use wasm_bindgen::JsCast;
+
         #fragment_code
     };
 

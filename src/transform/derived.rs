@@ -47,16 +47,16 @@ impl DerivedVar {
         }
     }
 
-    fn to_code(&self) -> proc_macro2::TokenStream {
+    pub fn to_code(&self) -> proc_macro2::TokenStream {
         let name = &self.data.name;
         let default = &self.data.default;
         let update_mask = self.update_mask;
-        let var_mask = 1 << self.data.flag_pos;
+        let var_mask: u64 = 1 << self.data.flag_pos;
 
         quote::quote! {
-            if DIRTY_FLAGS.load(SeqCst) & #update_mask != 0 {
-                state.#name = #default;
-                DIRTY_FLAGS.fetch_or(#var_mask, SeqCst);
+            if crate::DIRTY_FLAGS.load(std::sync::atomic::Ordering::SeqCst) & #update_mask != 0 {
+                self.#name = #default;
+                crate::DIRTY_FLAGS.fetch_or(#var_mask, std::sync::atomic::Ordering::SeqCst);
             }
         }
     }
@@ -75,7 +75,7 @@ pub fn build_derived_order(
         .collect();
 
     /// Depth first topological sort
-    /// 
+    ///
     /// Resolves derived var dependencies by ordering vars such that
     /// if var A depends on var B, then B will be updated before A
     fn visit(

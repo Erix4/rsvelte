@@ -8,11 +8,17 @@ use crate::{
             get_proc_func_if, get_unmount_func_if, get_update_func_if,
         },
         mount_func::{get_mount_func_block, get_mount_func_root},
-        new_func::{get_new_func_each, get_new_func_if_branch, get_new_func_root},
-        proc_func::{get_proc_func_each, get_proc_func_if_branch, get_proc_func_root},
+        new_func::{
+            get_new_func_each, get_new_func_if_branch, get_new_func_root,
+        },
+        proc_func::{
+            get_proc_func_each, get_proc_func_if_branch, get_proc_func_root,
+        },
         scope::ScopeData,
         unmount_func::get_unmount_func,
-        update_func::{get_update_func_block, get_update_func_each, get_update_func_root},
+        update_func::{
+            get_update_func_block, get_update_func_each, get_update_func_root,
+        },
     },
     transform::{Node, NodeElseBranch, NodeIfBranch, NodeType},
 };
@@ -42,8 +48,12 @@ pub fn get_all_fragment_code(
 ) -> proc_macro2::TokenStream {
     let root_fragment_name = format_ident!("C{}RootFrag", comp_id);
     let root_node_vec = vec![root_node];
-    let root_fragment =
-        get_root_fragment(&root_fragment_name, &vec![], &root_node_vec);
+    let root_fragment = get_root_fragment(
+        &root_fragment_name,
+        state_type,
+        &vec![],
+        &root_node_vec,
+    );
 
     let child_fragments = root_node_vec
         .iter()
@@ -51,6 +61,7 @@ pub fn get_all_fragment_code(
             node.get_fragments(state_type, &ScopeData::new(), state_funcs)
         })
         .collect::<Vec<_>>();
+    log::info!("Generated {} child fragments", child_fragments.len());
 
     quote::quote! {
         #root_fragment
@@ -132,11 +143,11 @@ impl Node {
 
 fn get_root_fragment(
     frag_name: &Ident,
+    state_type: &Ident,
     state_funcs: &Vec<ItemFn>,
     root_node_vec: &Vec<Node>,
 ) -> proc_macro2::TokenStream {
     let scope = ScopeData::new();
-    let state_name = format_ident!("{}State", frag_name);
 
     let struct_decl = get_struct_declaration(frag_name, root_node_vec);
     let new_func = get_new_func_root(root_node_vec, &scope);
@@ -149,7 +160,7 @@ fn get_root_fragment(
         pub #struct_decl
 
         impl crate::RootFragment for #frag_name {
-            type State = #state_name;
+            type State = #state_type;
 
             #new_func
             #mount_func
@@ -233,7 +244,7 @@ fn get_if_branch_fragment(
     quote::quote! {
         #struct_decl
 
-        impl #struct_name {
+        impl crate::GenericFragment for #struct_name {
             type State = #state_type;
             type Scope<'a> = #scope_type;
 
@@ -254,13 +265,12 @@ fn get_each_block_fragment(
     state_type: &Ident,
     mask: u64,
     expr: &syn::Expr,
-    state_funcs: &Vec<ItemFn>
+    state_funcs: &Vec<ItemFn>,
 ) -> proc_macro2::TokenStream {
     let struct_decl = get_struct_declaration(struct_name, nodes);
     let scope_type = scope.get_type();
 
-    let generate_func =
-        get_generate_func_each(mask, expr);
+    let generate_func = get_generate_func_each(mask, expr);
     let new_func = get_new_func_each(nodes, scope);
     let mount_func = get_mount_func_block(nodes);
     let proc_func = get_proc_func_each(nodes, state_funcs, scope);

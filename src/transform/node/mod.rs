@@ -244,7 +244,7 @@ impl Node {
                         ),
                     });
                 let enum_name =
-                    format_ident!("C{}IfBranch{}", comp_id_hash, value.id);
+                    format_ident!("C{}If{}", comp_id_hash, value.id);
                 NodeType::If(
                     node_if_branches,
                     node_else_branch,
@@ -313,13 +313,13 @@ impl Node {
                 }
             }
             NodeType::If(_, _, enum_name, _) => {
-                types.push(quote::quote! { IfElement<#enum_name> });
+                types.push(quote::quote! { crate::IfElement<#enum_name> });
             }
             NodeType::Each(_, _, _, frag_name, _) => {
-                types.push(quote::quote! { EachElement<#frag_name> });
+                types.push(quote::quote! { crate::EachElement<#frag_name> });
             }
             NodeType::Comp(comp_name, _) => {
-                types.push(quote::quote! { Component<#comp_name> });
+                types.push(quote::quote! { crate::Component<#comp_name> });
             }
         }
         types

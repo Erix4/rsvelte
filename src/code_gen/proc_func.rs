@@ -1,7 +1,11 @@
 use syn::ItemFn;
 
 use crate::{
-    EVENTS, code_gen::scope::ScopeData, parse::html_parse::AttrType, transform::{Node, NodeType, TagAttribute}, web_sys_qualify
+    EVENTS,
+    code_gen::scope::ScopeData,
+    parse::html_parse::AttrType,
+    transform::{Node, NodeType, TagAttribute},
+    web_sys_qualify,
 };
 
 /// Generates the `proc` function for root fragments
@@ -19,7 +23,12 @@ pub fn get_proc_func_if_branch(
     state_funcs: &Vec<ItemFn>,
     scope: &ScopeData,
 ) -> proc_macro2::TokenStream {
-    get_proc_func_ex(nodes, quote::quote! { Self::Scope<'_> }, state_funcs, scope)
+    get_proc_func_ex(
+        nodes,
+        quote::quote! { Self::Scope<'_> },
+        state_funcs,
+        scope,
+    )
 }
 
 /// Generates the `proc` function for each block fragments
@@ -28,7 +37,12 @@ pub fn get_proc_func_each(
     state_funcs: &Vec<ItemFn>,
     scope: &ScopeData,
 ) -> proc_macro2::TokenStream {
-    get_proc_func_ex(nodes, quote::quote! { (Self::Scope<'_>, &Self::Item) }, state_funcs, scope)
+    get_proc_func_ex(
+        nodes,
+        quote::quote! { (Self::Scope<'_>, &Self::Item) },
+        state_funcs,
+        scope,
+    )
 }
 
 fn get_proc_func_ex(
@@ -45,7 +59,7 @@ fn get_proc_func_ex(
 
     quote::quote! {
         fn proc(
-            &self,
+            &mut self,
             state: &mut Self::State,
             scope: #scope_type,
             e: web_sys::Event,
@@ -71,14 +85,16 @@ impl Node {
         state_funcs: &Vec<ItemFn>,
     ) -> Vec<proc_macro2::TokenStream> {
         let mut code = Vec::new();
-        let frag_field_idx = self.frag_field_idx;
+        let frag_field_idx = self.frag_field_idx as u32;
         match &self.content {
             NodeType::Tag(_, attributes, child_contents) => {
                 for attr in attributes {
+                    log::info!("Checking {} for event", attr.name);
                     if let Some(run_code) =
                         get_run_code_from_attribute(&attr.value, state_funcs)
                         && let Some(event_str_type) = get_js_event_str(attr)
                     {
+                        log::info!("Found event");
                         code.push(quote::quote! {
                             #event_str_type if target == #frag_field_idx => {
                                 #run_code
@@ -117,8 +133,8 @@ impl Node {
                 code.push(quote::quote! {
                     _ if target == #frag_field_idx => {
                         self.#struct_field.proc(state, scope, e, target_path)?;
-                        let child_bindable_flags = DIRTY_FLAGS.load(SeqCst);
-                        DIRTY_FLAGS.store(0, SeqCst);
+                        let child_bindable_flags = crate::DIRTY_FLAGS.load(std::sync::atomic::Ordering::SeqCst);
+                        crate::DIRTY_FLAGS.store(0, std::sync::atomic::Ordering::SeqCst);
 
                         #(#bindable_updates)*
 

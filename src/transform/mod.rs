@@ -1,9 +1,13 @@
 use std::collections::HashMap;
 
 use quote::format_ident;
+use syn::Ident;
 
 pub use crate::transform::derived::DerivedVar;
-pub use crate::transform::node::{Node, NodeType, NodeIfBranch, NodeElseBranch, TagAttribute};
+pub use crate::transform::node::{
+    Node, NodeElseBranch, NodeIfBranch, NodeType, TagAttribute,
+};
+use crate::transform::state::get_state_code_getter;
 use crate::{
     code_gen::CodeGenContext,
     parse::{self, ComponentAST},
@@ -61,7 +65,7 @@ pub fn transform(
 
     Ok(CodeGenContext {
         root_comp: root_context,
-        comps: comp_contexts
+        comps: comp_contexts,
     })
 }
 
@@ -69,6 +73,7 @@ pub struct CompContext {
     pub comp_id: String,
     pub root_node: Node,
     pub state_type: syn::Ident,
+    pub state_code_getter: Box<dyn Fn(&Ident) -> proc_macro2::TokenStream>,
     //pub state_vars (props, bindables, reactive, derived)
 
     //pub children_state (top level)
@@ -81,8 +86,8 @@ pub struct CompContext {
     //pub bind_handlers
     pub derived_handlers: Vec<DerivedVar>, //pub child_propagators
 
-    //pub html_body
-    //pub styles: Option<String>,
+                                           //pub html_body
+                                           //pub styles: Option<String>,
 }
 
 fn transform_component(
@@ -91,6 +96,7 @@ fn transform_component(
 ) -> Result<CompContext, CompileError> {
     // Check that event attributes have matching functions,
     // and collect event handlers
+    log::info!("{:?}", comp.body);
     let html_events = comp.body.get_events();
     let script = if let Some(script) = comp.script {
         script
@@ -113,7 +119,7 @@ fn transform_component(
 
     // Combine all reactive variables into a single list for easy lookup during transformation
     let state_vars: Vec<ReactiveVar> =
-        script.state_vars.into_iter().map(Into::into).collect();
+        script.state_vars.iter().cloned().map(Into::into).collect();
     let reactive_vars: Vec<ReactiveVar> = script
         .props
         .iter()
@@ -164,18 +170,8 @@ fn transform_component(
         &reactive_vars,
     );
 
-    // Transform init code
-    let init_code = if let Some(init_func) = script.init_func {
-        let init_func = transform_func(init_func, &reactive_vars);
-        quote::quote! {
-            #init_func
-        }
-    } else {
-        // Add empty fn if not user provided
-        quote::quote! {
-            fn init(&mut self) {}
-        }
-    };
+    let state_code_getter = get_state_code_getter(&script, &derived_handlers);
+
     let mut state_funcs = Vec::new();
 
     // Find and transform event handlers (functions, callers, and closures), validating their arguments
@@ -208,6 +204,7 @@ fn transform_component(
         state_type,
         derived_handlers,
         state_funcs,
+        state_code_getter,
         agnostic_code: script.agnostic_code,
     })
 }

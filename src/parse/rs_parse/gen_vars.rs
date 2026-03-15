@@ -11,7 +11,7 @@ use crate::parse::ScriptData;
 pub struct Prop {
     pub name: String,
     pub ty: syn::Type,
-    default: Option<syn::Expr>,
+    pub default: Option<syn::Expr>,
     pub flag_pos: u8,
 }
 
@@ -51,7 +51,11 @@ impl Debug for StateVar {
     }
 }
 
-fn parse_var(input: &mut ParseBuffer, script_data: &mut ScriptData, flag_pos: &mut u8) -> syn::Result<()> {
+fn parse_var(
+    input: &mut ParseBuffer,
+    script_data: &mut ScriptData,
+    flag_pos: &mut u8,
+) -> syn::Result<()> {
     let name: Ident = input.parse()?;
 
     let mut ty = None;
@@ -156,7 +160,10 @@ fn parse_var(input: &mut ParseBuffer, script_data: &mut ScriptData, flag_pos: &m
 }
 
 /// Parse variable declarations from the input stream
-pub fn gen_vars(input: &mut ParseStream, script_data: &mut ScriptData) -> syn::Result<()> {
+pub fn gen_vars(
+    input: &mut ParseStream,
+    script_data: &mut ScriptData,
+) -> syn::Result<()> {
     input.parse::<Token![struct]>()?; // Consume 'struct'
     input.parse::<Token![$]>()?; // Consume '$'
 
@@ -231,7 +238,8 @@ fn infer_type_from_expr(expr: &syn::Expr) -> Option<syn::Type> {
             let len = expr_array.elems.len();
             if let Some(first) = expr_array.elems.first() {
                 if let Some(elem_type) = infer_type_from_expr(first) {
-                    let type_str = format!("[{}; {}]", quote::quote!(#elem_type), len);
+                    let type_str =
+                        format!("[{}; {}]", quote::quote!(#elem_type), len);
                     return syn::parse_str(&type_str).ok();
                 }
             }
@@ -265,7 +273,8 @@ fn infer_type_from_expr(expr: &syn::Expr) -> Option<syn::Type> {
                 } else {
                     ""
                 };
-                let type_str = format!("&{}{}", mutability, quote::quote!(#inner_type));
+                let type_str =
+                    format!("&{}{}", mutability, quote::quote!(#inner_type));
                 return syn::parse_str(&type_str).ok();
             }
             None

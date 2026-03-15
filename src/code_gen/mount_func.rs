@@ -23,7 +23,7 @@ fn get_mount_func_ex(
     };
 
     let add_method = |struct_field: &Ident| {
-        quote::quote! { add_method(&self.#struct_field); }
+        quote::quote! { add_method(&self.#struct_field)?; }
     };
     let mounts = nodes
         .iter()
@@ -68,7 +68,7 @@ impl Node {
                     #add_line
                 };
 
-                let child_add_method= |child_struct_field: &Ident| {
+                let child_add_method = |child_struct_field: &Ident| {
                     quote::quote! {
                         self.#struct_field.append_child(&self.#child_struct_field)?;
                     }
@@ -85,7 +85,7 @@ impl Node {
             NodeType::If(_, _, _, _) | NodeType::Each(_, _, _, _, _) => {
                 // Mounting of #if and #each fragments is done inside functions, so we just call those functions here
                 let add_method = if let Some(parent) = parent {
-                    quote::quote! { child_append_closure(&self.#parent) }
+                    quote::quote! { crate::child_append_closure(&self.#parent) }
                 } else {
                     quote::quote! {quote::quote! { add_method } }
                 };
@@ -95,7 +95,7 @@ impl Node {
             }
             NodeType::Comp(_, _) => {
                 let add_method = if let Some(parent) = parent {
-                    quote::quote! { child_append_closure(&self.#parent) }
+                    quote::quote! { crate::child_append_closure(&self.#parent) }
                 } else {
                     quote::quote! {quote::quote! { add_method } }
                 };

@@ -10,9 +10,9 @@ pub struct IfBranch {
 pub enum ContentType {
     Text(String),
     Expr(syn::Expr),
-    Tag(Tag, Vec<Element>),                  // tag and its contents
+    Tag(Tag, Vec<Element>), // tag and its contents
     If(Vec<IfBranch>, Option<Vec<Element>>), // if branches, else branch
-    Each(syn::Expr, String, Vec<Element>),   // iterable expression, item name, contents
+    Each(syn::Expr, String, Vec<Element>), // iterable expression, item name, contents
 }
 
 impl Debug for ContentType {
@@ -37,7 +37,11 @@ impl Debug for ContentType {
                 write!(f, "If {{ {}{} }}", if_str, else_str)
             }
             ContentType::Each(_, item_name, contents) => {
-                write!(f, "Each {{ for {} in ? {{ {:?} }} }}", item_name, contents)
+                write!(
+                    f,
+                    "Each {{ for {} in ? {{ {:?} }} }}",
+                    item_name, contents
+                )
             }
         }
     }
@@ -136,11 +140,11 @@ pub fn read_element_with_tag(
 
 enum ReadContentExitReason {
     ClosingTag(String), // Found a closing tag, with the tag name
-    ElseIf(syn::Expr),  // Found an else if branch, with the condition expression
-    Else,               // Found an else branch
-    IfClose,            // Found the closing tag for an if block
-    EachClose,          // Found the closing tag for an each block
-    End,                // Reached the end of input
+    ElseIf(syn::Expr), // Found an else if branch, with the condition expression
+    Else,              // Found an else branch
+    IfClose,           // Found the closing tag for an if block
+    EachClose,         // Found the closing tag for an each block
+    End,               // Reached the end of input
 }
 
 fn read_contents(
@@ -161,11 +165,16 @@ fn read_contents(
                 let next_tag = read_tag(chars, coord);
                 match next_tag {
                     TagType::Opening(next_tag) => {
-                        let elem = read_element_with_tag(chars, coord, id_counter, next_tag);
+                        let elem = read_element_with_tag(
+                            chars, coord, id_counter, next_tag,
+                        );
                         elems.push(elem);
                     }
                     TagType::Closing(name) => {
-                        return (elems, ReadContentExitReason::ClosingTag(name));
+                        return (
+                            elems,
+                            ReadContentExitReason::ClosingTag(name),
+                        );
                     }
                 }
                 read_until(chars, |ch| !ch.is_whitespace(), coord);
@@ -177,8 +186,10 @@ fn read_contents(
                 expect_next(chars, '}', coord);
 
                 if expr_content.starts_with("#if") {
-                    let condition_str = expr_content.trim_start_matches("#if").trim();
-                    let condition = syn::parse_str::<syn::Expr>(condition_str).unwrap();
+                    let condition_str =
+                        expr_content.trim_start_matches("#if").trim();
+                    let condition =
+                        syn::parse_str::<syn::Expr>(condition_str).unwrap();
                     let mut if_branches = Vec::new();
 
                     // Read contents of the if block
@@ -190,8 +201,11 @@ fn read_contents(
                     });
 
                     // Read else if branches
-                    while let ReadContentExitReason::ElseIf(else_if_condition) = exit_reason {
-                        (if_contents, exit_reason) = read_contents(chars, coord, id_counter);
+                    while let ReadContentExitReason::ElseIf(else_if_condition) =
+                        exit_reason
+                    {
+                        (if_contents, exit_reason) =
+                            read_contents(chars, coord, id_counter);
                         if_branches.push(IfBranch {
                             condition: else_if_condition,
                             contents: if_contents,
@@ -199,39 +213,54 @@ fn read_contents(
                     }
 
                     // Read else branch if present
-                    if let ReadContentExitReason::Else = exit_reason {
-                        let (else_contents, exit_reason) = read_contents(chars, coord, id_counter);
-                        if_branches.push(IfBranch {
-                            condition: syn::parse_str("true").unwrap(), // else branch always executes if reached
-                            contents: else_contents,
-                        });
-                        assert!(matches!(exit_reason, ReadContentExitReason::IfClose));
-                    } else {
-                        assert!(matches!(exit_reason, ReadContentExitReason::IfClose));
-                    }
+                    let else_branch =
+                        if let ReadContentExitReason::Else = exit_reason {
+                            let (else_contents, _) =
+                                read_contents(chars, coord, id_counter);
+                            Some(else_contents)
+                        } else {
+                            None
+                        };
+                    elems.push(Element {
+                        id,
+                        content: ContentType::If(if_branches, else_branch),
+                    });
                 } else if expr_content.starts_with("#each") {
-                    let each_str = expr_content.trim_start_matches("#each").trim();
+                    let each_str =
+                        expr_content.trim_start_matches("#each").trim();
                     // Expect format: {#each items as item} - each_str should be "items as item"
-                    let parts: Vec<&str> = each_str.split_whitespace().collect();
+                    let parts: Vec<&str> =
+                        each_str.split_whitespace().collect();
                     if parts.len() != 4 || parts[1] != "as" {
                         panic!(
                             "Invalid #each expression at line {}, col {}: expected format '{{#each items as item}}'",
                             coord.line, coord.col
                         );
                     }
-                    let iterable_expr = syn::parse_str::<syn::Expr>(parts[0]).unwrap();
+                    let iterable_expr =
+                        syn::parse_str::<syn::Expr>(parts[0]).unwrap();
                     let item_name = parts[2].to_string();
 
                     // Read contents of the each block
-                    let (each_contents, exit_reason) = read_contents(chars, coord, id_counter);
-                    assert!(matches!(exit_reason, ReadContentExitReason::EachClose));
+                    let (each_contents, exit_reason) =
+                        read_contents(chars, coord, id_counter);
+                    assert!(matches!(
+                        exit_reason,
+                        ReadContentExitReason::EachClose
+                    ));
                     elems.push(Element {
                         id,
-                        content: ContentType::Each(iterable_expr, item_name, each_contents),
+                        content: ContentType::Each(
+                            iterable_expr,
+                            item_name,
+                            each_contents,
+                        ),
                     });
                 } else if expr_content.starts_with(":else if") {
-                    let condition_str = expr_content.trim_start_matches(":else if").trim();
-                    let condition = syn::parse_str::<syn::Expr>(condition_str).unwrap();
+                    let condition_str =
+                        expr_content.trim_start_matches(":else if").trim();
+                    let condition =
+                        syn::parse_str::<syn::Expr>(condition_str).unwrap();
                     return (elems, ReadContentExitReason::ElseIf(condition));
                 } else if expr_content.starts_with(":else") {
                     return (elems, ReadContentExitReason::Else);
@@ -241,7 +270,8 @@ fn read_contents(
                     return (elems, ReadContentExitReason::EachClose);
                 } else {
                     // Just a normal expression in text content
-                    let expr = syn::parse_str::<syn::Expr>(&expr_content).unwrap();
+                    let expr =
+                        syn::parse_str::<syn::Expr>(&expr_content).unwrap();
                     elems.push(Element {
                         id,
                         content: ContentType::Expr(expr),
@@ -303,16 +333,28 @@ impl Debug for Tag {
             .map(|(name, attr_type)| match attr_type {
                 AttrType::Str(value) => format!("{}=\"{}\"", name, value),
                 AttrType::Call(call) => {
-                    format!("{}={}", name, quote::ToTokens::to_token_stream(call))
+                    format!(
+                        "{}={}",
+                        name,
+                        quote::ToTokens::to_token_stream(call)
+                    )
                 }
                 AttrType::Expr(expr) => {
-                    format!("{}={}", name, quote::ToTokens::to_token_stream(&expr))
+                    format!(
+                        "{}={}",
+                        name,
+                        quote::ToTokens::to_token_stream(&expr)
+                    )
                 }
                 AttrType::Closure(_) => {
                     format!("{}=|...| {{ ... }}", name)
                 }
                 AttrType::Bind(var) => {
-                    format!("{}=bind({})", name, quote::ToTokens::to_token_stream(var))
+                    format!(
+                        "{}=bind({})",
+                        name,
+                        quote::ToTokens::to_token_stream(var)
+                    )
                 }
             })
             .collect::<Vec<_>>()
@@ -330,11 +372,15 @@ pub enum TagType {
     Closing(String),
 }
 
-pub fn read_tag(chars: &mut std::iter::Peekable<std::str::Chars>, coord: &mut Coord) -> TagType {
+pub fn read_tag(
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+    coord: &mut Coord,
+) -> TagType {
     expect_next(chars, '<', coord);
     if chars.peek() == Some(&'/') {
         chars.next();
-        let name = read_until(chars, |ch| ch.is_whitespace() || ch == '>', coord);
+        let name =
+            read_until(chars, |ch| ch.is_whitespace() || ch == '>', coord);
         expect_next(chars, '>', coord);
         return TagType::Closing(name);
     }
@@ -386,7 +432,8 @@ fn parse_attr(
     chars: &mut std::iter::Peekable<std::str::Chars>,
     coord: &mut Coord,
 ) -> (String, AttrType) {
-    let attr_name = read_until(chars, |ch| ch == '=' || ch.is_whitespace(), coord);
+    let attr_name =
+        read_until(chars, |ch| ch == '=' || ch.is_whitespace(), coord);
     expect_next(chars, '=', coord);
     let attr_value = if let Some(&ch) = chars.peek() {
         if ch == '"' {
@@ -401,7 +448,8 @@ fn parse_attr(
 
             if attr_name.starts_with("bind:") {
                 let name = attr_name.trim_start_matches("bind:").to_string();
-                let var_name = syn::Ident::new(&name, proc_macro2::Span::call_site());
+                let var_name =
+                    syn::Ident::new(&name, proc_macro2::Span::call_site());
                 return (name, AttrType::Bind(var_name));
             }
 

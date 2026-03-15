@@ -1,5 +1,7 @@
 use crate::{
-    code_gen::scope::ScopeData, parse::html_parse::AttrType, transform::{Node, NodeType}
+    code_gen::scope::ScopeData,
+    parse::html_parse::AttrType,
+    transform::{Node, NodeType},
 };
 
 /// Generates the `update` function for root fragments
@@ -123,7 +125,7 @@ impl Node {
                         prop_setters.push(quote::quote! {
                             if flags & #flag_mask != 0 {
                                 self.#struct_field.#prop_name = #expr;
-                                DIRTY_FLAGS.fetch_or(#child_comp_mask, SeqCst);
+                                crate::DIRTY_FLAGS.fetch_or(#child_comp_mask, std::sync::atomic::Ordering::SeqCst);
                             }
                         });
                         all_comp_flags |= flag_mask;
@@ -132,7 +134,7 @@ impl Node {
 
                 code.push(quote::quote! {
                     if flags & #all_comp_flags != 0 {
-                        DIRTY_FLAGS.store(0, SeqCst);
+                        crate::DIRTY_FLAGS.store(0, std::sync::atomic::Ordering::SeqCst);
 
                         #(#prop_setters)*
 
