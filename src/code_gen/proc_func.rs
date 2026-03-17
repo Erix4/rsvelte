@@ -89,12 +89,10 @@ impl Node {
         match &self.content {
             NodeType::Tag(_, attributes, child_contents) => {
                 for attr in attributes {
-                    log::info!("Checking {} for event", attr.name);
                     if let Some(run_code) =
                         get_run_code_from_attribute(&attr.value, state_funcs)
                         && let Some(event_str_type) = get_js_event_str(attr)
                     {
-                        log::info!("Found event");
                         code.push(quote::quote! {
                             #event_str_type if target == #frag_field_idx => {
                                 #run_code

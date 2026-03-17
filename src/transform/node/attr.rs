@@ -3,7 +3,7 @@ use syn::Ident;
 use crate::{
     parse::html_parse::{AttrType, Tag},
     transform::{
-        ReactiveVar, expr::transform_content_expr, node::TagAttribute,
+        ReactiveVar, expr::transform_content_expr, node::{EachVar, TagAttribute},
     },
 };
 
@@ -14,6 +14,7 @@ pub fn transform_attr(
     state_vars: &Vec<ReactiveVar>,
     reactive_vars: &Vec<ReactiveVar>,
     state_funcs: &Vec<&Ident>,
+    scoped_vars: &Vec<EachVar>,
 ) -> (String, Vec<TagAttribute>) {
     let mut attrs_out = Vec::new();
 
@@ -25,7 +26,7 @@ pub fn transform_attr(
                 flag_mask: None,
             }),
             AttrType::Closure(mut closure) => {
-                closure.body = transform_content_expr(closure.body, state_vars, reactive_vars).0;
+                closure.body = transform_content_expr(closure.body, state_vars, reactive_vars, scoped_vars).0;
                 attrs_out.push(TagAttribute {
                     name,
                     value: AttrType::Closure(closure),
@@ -35,7 +36,7 @@ pub fn transform_attr(
             AttrType::Expr(expr) => {
                 log::info!("transforming expression for {}", name);
                 let (expr, flag_mask) =
-                    transform_content_expr(expr, state_vars, reactive_vars);
+                    transform_content_expr(expr, state_vars, reactive_vars, scoped_vars);
                 if flag_mask == 0 {
                     // No reactive vars, check if it's a function call to a state function
                     let attr_type = if let syn::Expr::Path(path) = expr {

@@ -1,7 +1,14 @@
-use std::{fs::File, hash::{Hash, Hasher}, io::Read};
+use std::{
+    env,
+    fs::{self, File},
+    hash::{Hash, Hasher},
+    io::Read,
+    path::{Path, PathBuf},
+};
 
-use crate::utils::*;
+use crate::{parse::css_parse::CSSRule, utils::*};
 
+pub mod css_parse;
 pub mod html_parse;
 mod rs_parse;
 
@@ -11,8 +18,10 @@ pub use rs_parse::{Prop, ScriptData, StateVar};
 pub fn get_all_components(
     path: &str,
 ) -> Result<Vec<ComponentAST>, CompileError> {
+    let path = fs::canonicalize(path)?;
+
     let mut components = Vec::new();
-    let mut paths_to_process = vec![path.to_string()];
+    let mut paths_to_process = vec![path];
     let mut seen_paths = std::collections::HashSet::new();
 
     while let Some(current_path) = paths_to_process.pop() {
@@ -21,24 +30,17 @@ pub fn get_all_components(
         }
         seen_paths.insert(current_path.clone());
 
-        let component_ast = parse(&current_path)?;
+        let component_ast = parse(current_path.clone())?;
 
         // Add imported components to paths_to_process
         if let Some(script) = &component_ast.script {
             for import in &script.imports {
                 // Check if the import path is absolute or relative
-                if import.path.starts_with("/") {
-                    paths_to_process.push(import.path.clone());
-                    continue;
-                }
-
-                // Resolve relative import path
-                let import_path = std::path::Path::new(&current_path)
-                    .parent()
-                    .unwrap()
-                    .join(&import.path);
-                paths_to_process
-                    .push(import_path.to_str().unwrap().to_string());
+                let resolved_path = resolve_path_location(
+                    &import.path,
+                    current_path.parent().unwrap(),
+                )?;
+                paths_to_process.push(resolved_path);
             }
         }
 
@@ -50,20 +52,20 @@ pub fn get_all_components(
 
 pub struct ComponentAST {
     pub id_hash: String, // Unique hash based on source path for this component, used for generating unique identifiers during codegen
-    pub source_path: String,
+    pub source_path: PathBuf,
     pub body: html_parse::Element,
     pub script: Option<rs_parse::ScriptData>,
-    pub style: Option<String>,
+    pub style: Option<Vec<CSSRule>>,
 }
 
 struct ComponentASTBuilder {
     body: Option<html_parse::Element>,
     script: Option<rs_parse::ScriptData>,
-    style: Option<String>,
+    style: Option<Vec<CSSRule>>,
 }
 
 impl ComponentASTBuilder {
-    fn into(self, source_path: String) -> Result<ComponentAST, CompileError> {
+    fn into(self, source_path: PathBuf) -> Result<ComponentAST, CompileError> {
         // Create unique hash string for this component
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         Hash::hash(&source_path, &mut hasher);
@@ -72,15 +74,17 @@ impl ComponentASTBuilder {
         Ok(ComponentAST {
             id_hash,
             source_path,
-            body: self.body.ok_or_else(|| generic_error("No HTML body found in component"))?,
+            body: self.body.ok_or_else(|| {
+                generic_error("No HTML body found in component")
+            })?,
             script: self.script,
             style: self.style,
         })
     }
 }
 
-pub fn parse(filepath: &str) -> Result<ComponentAST, CompileError> {
-    let main_page_file = File::open(filepath)?;
+pub fn parse(filepath: PathBuf) -> Result<ComponentAST, CompileError> {
+    let main_page_file = File::open(&filepath)?;
     let mut reader = std::io::BufReader::new(main_page_file);
 
     let mut contents = String::new();
@@ -116,12 +120,12 @@ pub fn parse(filepath: &str) -> Result<ComponentAST, CompileError> {
         }
     }
 
-    builder.into(filepath.to_string())
+    builder.into(filepath)
 }
 
 enum ParentElement {
     Script(rs_parse::ScriptData),
-    Style(String), // CSS is copied verbatim
+    Style(Vec<CSSRule>),
     Body(html_parse::Element),
 }
 
@@ -146,10 +150,30 @@ fn read_parent_elem(
     } else if tag.name == "style" {
         let css = read_until(chars, |ch| ch == '<', coord);
         read_closing_tag(chars, coord, "style");
-        Ok(ParentElement::Style(css))
+        Ok(ParentElement::Style(css_parse::parse_css(&css)))
     } else {
         Ok(ParentElement::Body(read_element_with_tag(
             chars, coord, id_counter, tag,
         )))
     }
+}
+
+fn resolve_path_location(
+    path_str: &str,
+    current_dir: &Path,
+) -> Result<PathBuf, CompileError> {
+    log::info!(
+        "Resolving path: '{}' relative to '{}'",
+        path_str,
+        current_dir.display()
+    );
+    // TODO: add library paths like $lib and $components
+    let path = std::path::Path::new(path_str);
+    log::info!("Parsed path: '{}'", path.display());
+    env::set_current_dir(current_dir)?;
+    log::info!(
+        "Changed current directory to '{}'",
+        env::current_dir()?.display()
+    );
+    Ok(fs::canonicalize(path)?)
 }

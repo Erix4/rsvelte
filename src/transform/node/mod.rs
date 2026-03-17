@@ -39,6 +39,7 @@ pub struct TagAttribute {
 #[derive(Clone)]
 pub struct EachVar {
     pub name: Ident,
+    pub original_name: Ident,
     pub ty: syn::Type,
 }
 
@@ -125,13 +126,14 @@ impl Node {
             ContentType::Text(txt) => NodeType::Text(txt),
             ContentType::Expr(expr) => {
                 let (expr, flag_mask) =
-                    transform_content_expr(expr, state_vars, reactive_vars);
+                    transform_content_expr(expr, state_vars, reactive_vars, scoped_vars);
                 NodeType::Expr(expr, flag_mask)
             }
             ContentType::Tag(tag, children) => {
                 // TODO: handle binds here
                 let (tag_name, attributes): (String, Vec<TagAttribute>) =
-                    transform_attr(tag, state_vars, reactive_vars, state_funcs);
+                    transform_attr(tag, state_vars, reactive_vars, state_funcs, scoped_vars);
+                let attributes = add_css_scope_to_class_attr(attributes, comp_id_hash);
                 if tag_name.starts_with(char::is_uppercase) {
                     // check if this is a valid component
                     if let Some(comp_ast) = component_map.get(&tag_name) {
@@ -190,6 +192,7 @@ impl Node {
                             branch.condition,
                             state_vars,
                             reactive_vars,
+                            scoped_vars,
                         );
                         flag_mask |= flags;
 
@@ -272,13 +275,15 @@ impl Node {
                     inferred_expr_type,
                 );
                 let each_var = EachVar {
-                    name: format_ident!("{}", item_name),
+                    name: format_ident!("{}_scope", item_name),
+                    original_name: format_ident!("{}", item_name),
                     ty: item_type,
                 };
                 let (each_expr, flags) = transform_content_expr(
                     each_expr,
                     state_vars,
                     reactive_vars,
+                    scoped_vars,
                 );
                 let mut scoped_vars = scoped_vars.clone();
                 scoped_vars.push(each_var.clone());
@@ -403,4 +408,41 @@ fn each_expr_to_vec_and_item_type(
         }
         _ => panic!("Unsupported type for #each expression"),
     }
+}
+
+fn add_css_scope_to_class_attr(attributes: Vec<TagAttribute>, scope_id: &String) -> Vec<TagAttribute> {
+    let mut new_attributes = Vec::new();
+    let scope_class = format!("C{}", scope_id);
+    let mut has_class_attr = false;
+    for attr in attributes {
+        if attr.name == "class" {
+            has_class_attr = true;
+            let new_value = match &attr.value {
+                AttrType::Str(s) => {
+                    let new_str = format!("{} {}", s, scope_class);
+                    AttrType::Str(new_str)
+                }
+                AttrType::Expr(expr) => {
+                    let new_expr = syn::parse_quote! { format!("{} {}", #expr, #scope_class) };
+                    AttrType::Expr(new_expr)
+                }
+                _ => panic!("Unsupported class attribute type"),
+            };
+            new_attributes.push(TagAttribute {
+                name: attr.name,
+                value: new_value,
+                flag_mask: attr.flag_mask,
+            });
+        } else {
+            new_attributes.push(attr);
+        }
+    }
+    if !has_class_attr {
+        new_attributes.push(TagAttribute {
+            name: "class".to_string(),
+            value: AttrType::Str(scope_class),
+            flag_mask: None,
+        });
+    }
+    new_attributes
 }

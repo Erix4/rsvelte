@@ -23,6 +23,7 @@ pub enum ElementArrayItem {
 pub struct CodeGenContext {
     pub root_comp: CompContext,
     pub comps: Vec<CompContext>,
+    pub css_rules: Vec<String>,
 }
 
 pub fn code_gen(
@@ -58,7 +59,10 @@ pub fn code_gen(
 
     let state_rs_str = state_rs_tokens.to_string();
 
+    let css_str = context.css_rules.join("\n");
+
     Ok(CompileOutput {
         state_rs: state_rs_str,
+        css: css_str,
     })
 }

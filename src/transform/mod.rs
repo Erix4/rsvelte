@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use quote::format_ident;
 use syn::Ident;
 
+use crate::parse::css_parse::CSSRule;
 pub use crate::transform::derived::DerivedVar;
 pub use crate::transform::node::{
     Node, NodeElseBranch, NodeIfBranch, NodeType, TagAttribute,
@@ -55,17 +56,27 @@ pub fn transform(
         return Err(generic_error("No components found in project"));
     }
 
+    let mut css_rules = Vec::new();
+
     let root_comp = components.remove(0);
+    if let Some(style) = &root_comp.style {
+        css_rules.extend(gen_css_rules(&style, &root_comp.id_hash));
+    }
     let root_context = transform_component(root_comp, &components)?;
     let mut comp_contexts = Vec::new();
     for _ in 0..components.len() {
         let comp = components.remove(0);
+        if let Some(style) = &comp.style {
+            css_rules.extend(gen_css_rules(&style, &comp.id_hash));
+        }
         comp_contexts.push(transform_component(comp, &components)?);
     }
+    log::info!("Generated CSS rules: {:?}", css_rules);
 
     Ok(CodeGenContext {
         root_comp: root_context,
         comps: comp_contexts,
+        css_rules,
     })
 }
 
@@ -96,7 +107,6 @@ fn transform_component(
 ) -> Result<CompContext, CompileError> {
     // Check that event attributes have matching functions,
     // and collect event handlers
-    log::info!("{:?}", comp.body);
     let html_events = comp.body.get_events();
     let script = if let Some(script) = comp.script {
         script
@@ -140,7 +150,7 @@ fn transform_component(
             component_map.insert(&import.name, comp);
         } else {
             return Err(generic_error(&format!(
-                "Component '{}' imported but not found in project",
+                "Component '{:?}' imported but not found in project",
                 comp.source_path
             )));
         }
@@ -208,4 +218,22 @@ fn transform_component(
         state_code_getter,
         agnostic_code: script.agnostic_code,
     })
+}
+
+pub fn gen_css_rules(
+    css_rules: &Vec<CSSRule>,
+    comp_id_hash: &String,
+) -> Vec<String> {
+    css_rules
+        .iter()
+        .map(|rule| {
+            let selector = format!("{}.C{}", rule.selector, comp_id_hash);
+            let mut rule_string = format!("{} {{\n", selector);
+            for decl in &rule.declarations {
+                rule_string.push_str(&format!("  {}\n", decl));
+            }
+            rule_string.push_str("}\n");
+            rule_string
+        })
+        .collect()
 }

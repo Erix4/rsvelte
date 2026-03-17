@@ -1,4 +1,4 @@
-use crate::transform::ReactiveVar;
+use crate::transform::{ReactiveVar, node::EachVar};
 use quote::ToTokens;
 use syn::{parse::Parser, visit_mut::VisitMut};
 
@@ -9,15 +9,21 @@ use syn::{parse::Parser, visit_mut::VisitMut};
 /// would become: `*state.counter`, but {my_struct.a} would be `state.my_struct.a`.
 /// There's no need to dereference if the state variable is already being accessed with dot notation.
 /// Deferences are only needed on $state variables, as all others have manually set flags.
+/// 
+/// In addition to state variables, scoped variables also need to be adjusted, not to
+/// dereference them but to replace them with their modified identifiers (modified to avoid
+/// collisions with non-user code). This is done via similar logic to state variables.
 pub fn transform_content_expr(
     mut expr: syn::Expr,
     state_vars: &Vec<ReactiveVar>,
     reactive_vars: &Vec<ReactiveVar>,
+    scoped: &Vec<EachVar>,
 ) -> (syn::Expr, u64) {
     // Use a visitor to traverse the expression AST
     struct VarVisitor<'a> {
         state_vars: &'a Vec<ReactiveVar>,
         reactive_vars: &'a Vec<ReactiveVar>,
+        scoped: &'a Vec<EachVar>,
         flags: u64,
     }
 
@@ -50,6 +56,17 @@ pub fn transform_content_expr(
                             break;
                         }
                     }
+                    for var in self.scoped.iter() {
+                        if var.original_name == *ident {
+                            // Found a scoped variable, replace with modified identifier
+                            let modified_ident = &var.name;
+                            *expr = syn::parse2(quote::quote! {
+                                #modified_ident
+                            })
+                            .unwrap();
+                            break;
+                        }
+                    }
                 }
             }
             syn::visit_mut::visit_expr_mut(self, expr);
@@ -59,6 +76,7 @@ pub fn transform_content_expr(
     let mut visitor = VarVisitor {
         state_vars,
         reactive_vars,
+        scoped,
         flags: 0,
     };
 

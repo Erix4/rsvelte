@@ -1,4 +1,6 @@
 <script>
+    import Button from "./Button.rsvelte";
+
     struct $state {
         counter = $state(0),
     }
@@ -6,6 +8,7 @@
 
 <div>
     <button onclick={|| counter += 1}>Increment</button>
+    <Button/>
     <p>
         Hello world!
         {#if counter > 5}

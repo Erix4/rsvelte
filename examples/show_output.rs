@@ -21,6 +21,9 @@ fn main() {
     state_rs_file
         .write_all(compile_out.state_rs.as_bytes())
         .unwrap();
+    let mut css_file =
+        File::create(format!("{}/style.css", output_path)).unwrap();
+    css_file.write_all(compile_out.css.as_bytes()).unwrap();
 
     let fmt_status = Command::new("rustfmt")
         .arg("./src/state.rs")

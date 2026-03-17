@@ -32,7 +32,7 @@ use log::{error, info};
 use tempdir::TempDir;
 use utils::*;
 
-use crate::parse::get_all_components;
+use crate::{parse::get_all_components, transform::gen_css_rules};
 
 /// List of supported events: (attribute name, web_sys type, JS event type)
 ///
@@ -73,6 +73,7 @@ pub fn web_sys_qualify(event_str: &str) -> String {
 
 pub struct CompileOutput {
     pub state_rs: String,
+    pub css: String,
 }
 
 /// Main compile function
@@ -171,6 +172,19 @@ cfg_if::cfg_if! {
         const INDEX_HTML: &str = include_str!(r"static_files/index.html");
         const CARGO_TOML: &str = include_str!(r"static_files/Cargo.toml");
     }
+}
+
+/// Compile .rsvelte file to CSS only, returning the generated CSS as a string
+/// This can be used for development reloading of CSS without needing to recompile the entire Rust codebase
+pub fn compile_css_only(filepath: &str) -> Result<String, CompileError> {
+    let components = get_all_components(filepath)?;
+    let mut css_rules = Vec::new();
+    for comp in components {
+        if let Some(style) = &comp.style {
+            css_rules.extend(gen_css_rules(&style, &comp.id_hash));
+        }
+    }
+    Ok(css_rules.join("\n"))
 }
 
 /// Setup output directory for manual development

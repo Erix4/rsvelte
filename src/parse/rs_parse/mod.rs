@@ -93,13 +93,15 @@ impl Parse for ScriptData {
                 let component_name: Ident = input.parse()?;
                 let _: Ident = input.parse()?; // Consume 'from' keyword
                 let import_path: syn::LitStr = input.parse()?;
+                let _: Token![;] = input.parse()?; // Consume ';' at end of import statement
+
 
                 script_data.imports.push(ComponentImport {
                     name: component_name.to_string(),
                     path: import_path.value(),
                 });
             } else {
-                // Unrecognized item, consume it as tokens
+                // Unrecognized item, consume it as tokens (includes comments)
                 let item: syn::Item = input.parse()?;
                 script_data.agnostic_code.push(quote::quote! { #item });
             }
