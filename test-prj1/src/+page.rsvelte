@@ -14,4 +14,8 @@
             <p>Hi!</p>
         {/if}
     </p>
+    <p>Counter: {counter}</p>
+    {#each 0..counter as i}
+        <p>Count: {i}</p>
+    {/each}
 </div>

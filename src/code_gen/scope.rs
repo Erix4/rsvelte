@@ -8,7 +8,7 @@
 pub struct ScopeData<'a> {
     name: syn::Ident,
     ty: syn::Type,
-    child: Option<&'a ScopeData<'a>>,
+    pub child: Option<&'a ScopeData<'a>>,
 }
 
 impl ScopeData<'_> {

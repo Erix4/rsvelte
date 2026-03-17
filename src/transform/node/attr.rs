@@ -15,7 +15,6 @@ pub fn transform_attr(
     reactive_vars: &Vec<ReactiveVar>,
     state_funcs: &Vec<&Ident>,
 ) -> (String, Vec<TagAttribute>) {
-    log::info!("transforming tag <{}>", tag.name);
     let mut attrs_out = Vec::new();
 
     for (name, attr) in tag.attributes {
@@ -25,8 +24,8 @@ pub fn transform_attr(
                 value: AttrType::Str(str),
                 flag_mask: None,
             }),
-            AttrType::Closure(closure) => {
-                //
+            AttrType::Closure(mut closure) => {
+                closure.body = transform_content_expr(closure.body, state_vars, reactive_vars).0;
                 attrs_out.push(TagAttribute {
                     name,
                     value: AttrType::Closure(closure),

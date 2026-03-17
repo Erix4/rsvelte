@@ -45,7 +45,7 @@ fn get_new_func_ex(
     let mut listeners = Vec::new();
     for node in nodes {
         struct_fields.extend(node.get_fields());
-        creators.push(node.get_create_code(scope));
+        creators.push(node.get_create_code());
         listeners.extend(node.get_listeners());
     }
 
@@ -81,7 +81,7 @@ impl Node {
     /// let d = node_4_create(&state)?;
     /// ```
     /// This is done statefully, using page state and scoped variables (for #each blocks)
-    fn get_create_code(&self, scope: &ScopeData) -> proc_macro2::TokenStream {
+    fn get_create_code(&self) -> proc_macro2::TokenStream {
         let struct_field = &self.struct_field;
         match &self.content {
             NodeType::Text(text) => {
@@ -96,7 +96,7 @@ impl Node {
             }
             NodeType::Tag(tag_name, attributes, children) => {
                 let children_code =
-                    children.iter().map(|child| child.get_create_code(scope));
+                    children.iter().map(|child| child.get_create_code());
                 let attribute_setters = attributes.iter().filter(|attr| attr.flag_mask.is_none()).map(|attr| {
                     let attr_name = &attr.name;
                     if let Some(attr_value) = match &attr.value {
@@ -125,12 +125,12 @@ impl Node {
             }
             NodeType::Each(_, _, _, _, _) => {
                 quote::quote! {
-                    let #struct_field = EachElement::new(state, scope, current_path)?;
+                    let #struct_field = crate::EachElement::new(state, scope, current_path)?;
                 }
             }
             NodeType::Comp(comp_name, _) => {
                 quote::quote! {
-                    let #struct_field = Component::<#comp_name>::new()?;
+                    let #struct_field = crate::Component::<#comp_name>::new()?;
                 }
                 // Downward state propagation is done after creation in the apply() function
             }

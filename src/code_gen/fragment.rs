@@ -122,15 +122,19 @@ impl Node {
                     struct_name,
                     nodes,
                     &each_var.ty,
-                    &scope.wrap(each_var.name.clone(), each_var.ty.clone()),
+                    &each_var.name,
+                    &scope,
                     state_type,
                     *mask,
                     expr,
                     state_funcs,
                 ));
                 for node in nodes {
-                    let mut child_code =
-                        node.get_fragments(state_type, scope, state_funcs);
+                    let mut child_code = node.get_fragments(
+                        state_type,
+                        &scope.wrap(each_var.name.clone(), each_var.ty.clone()),
+                        state_funcs,
+                    );
                     code.append(&mut child_code);
                 }
                 code
@@ -157,7 +161,7 @@ fn get_root_fragment(
     let unmount_func = get_unmount_func(root_node_vec);
 
     quote::quote! {
-        pub #struct_decl
+        #struct_decl
 
         impl crate::RootFragment for #frag_name {
             type State = #state_type;
@@ -206,7 +210,8 @@ fn get_if_enum_fragment(
         get_unmount_func_if(branches.len(), else_branch.is_some());
 
     quote::quote! {
-        enum #enum_name {
+        #[derive(Clone)]
+        pub enum #enum_name {
             #(#enum_branches),*,
             #else_enum_branch
         }
@@ -261,6 +266,7 @@ fn get_each_block_fragment(
     struct_name: &Ident,
     nodes: &Vec<Node>,
     item_type: &syn::Type,
+    item_name: &Ident,
     scope: &ScopeData,
     state_type: &Ident,
     mask: u64,
@@ -269,12 +275,13 @@ fn get_each_block_fragment(
 ) -> proc_macro2::TokenStream {
     let struct_decl = get_struct_declaration(struct_name, nodes);
     let scope_type = scope.get_type();
+    let wrapped_scope = scope.wrap(item_name.clone(), item_type.clone());
 
     let generate_func = get_generate_func_each(mask, expr);
-    let new_func = get_new_func_each(nodes, scope);
+    let new_func = get_new_func_each(nodes, &wrapped_scope);
     let mount_func = get_mount_func_block(nodes);
-    let proc_func = get_proc_func_each(nodes, state_funcs, scope);
-    let update_func = get_update_func_each(nodes, scope);
+    let proc_func = get_proc_func_each(nodes, state_funcs, &wrapped_scope);
+    let update_func = get_update_func_each(nodes, &wrapped_scope);
     let unmount_func = get_unmount_func(nodes);
 
     quote::quote! {
@@ -308,7 +315,8 @@ fn get_struct_declaration(
         .collect::<Vec<_>>();
 
     quote::quote! {
-        struct #frag_name {
+        #[derive(Clone)]
+        pub struct #frag_name {
             #(#struct_field_declarations),*
         }
     }

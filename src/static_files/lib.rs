@@ -50,6 +50,7 @@ trait ComponentState {
     fn update_derived(&mut self);
 }
 
+// TODO: rectify that this doesn't derive clone
 struct Component<T: RootFragment> {
     contents: T,
     state: T::State,
@@ -312,6 +313,7 @@ impl<T: IfContentTrait> GenericFragment for IfElement<T> {
 
 /// Represents the content of an each block, which may have multiple instances
 /// Each instance is identified by a unique key produced by a hash function
+#[derive(Clone)]
 struct EachElement<T: EachContentTrait> {
     pub comment: web_sys::Comment,
     pub content: Vec<(u64, T, T::Item)>, // (hash, DOM ref, item)
@@ -344,8 +346,8 @@ trait EachContentTrait {
         add_method: impl AddMethod,
     ) -> Result<(), JsValue>;
     fn proc(
-        &self,
-        state: &Self::State,
+        &mut self,
+        state: &mut Self::State,
         scope: (Self::Scope<'_>, &Self::Item),
         e: web_sys::Event,
         target_path: Vec<u32>,
@@ -410,7 +412,7 @@ impl<T: EachContentTrait + Clone> GenericFragment for EachElement<T> {
         e: web_sys::Event,
         target_path: Vec<u32>,
     ) -> Result<(), JsValue> {
-        for (_, content, item) in &self.content {
+        for (_, content, item) in &mut self.content {
             content.proc(
                 state,
                 (scope, item),

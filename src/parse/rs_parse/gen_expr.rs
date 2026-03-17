@@ -4,7 +4,7 @@ use crate::parse::html_parse::AttrType;
 
 #[derive(Clone)]
 pub struct AttrClosure {
-    pub event_arg: Option<(syn::PatIdent, syn::Type)>,
+    pub event_arg: Option<(syn::Ident, syn::Type)>,
     pub body: syn::Expr,
 }
 
@@ -30,9 +30,11 @@ pub fn parse_attr_expression(
             .trim_matches('|')
             .split(',')
             .map(|s| s.trim())
+            .filter(|a| !a.is_empty())
             .collect::<Vec<&str>>();
 
         for arg in closure_args_strs {
+            println!("Parsing closure argument: {}", arg);
             if let None = event_arg {
                 if !is_event {
                     return Err(syn::Error::new(
@@ -44,10 +46,12 @@ pub fn parse_attr_expression(
                     syn::parse_str::<syn::FnArg>(arg)
                     && let syn::Pat::Ident(ident) = *arg.pat
                 {
-                    Some((ident, *arg.ty))
+                    Some((ident.ident, *arg.ty))
                 } else {
+                    // If no type annotation, assume it's an event argument of type `web_sys::Event`
+                    // and parse the argument as an identifier
                     Some((
-                        syn::parse2(quote::quote! {#arg})?,
+                        syn::Ident::new(arg, proc_macro2::Span::call_site()),
                         syn::parse2(quote::quote! {web_sys::Event})?,
                     ))
                 }

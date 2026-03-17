@@ -132,7 +132,7 @@ fn parse_var(
                 default: expr_as_res(default_expr)?,
                 flag_pos: *flag_pos,
             };
-            script_data.derived_vars.push(state_var);
+            script_data.state_vars.push(state_var);
         }
         "derived" => {
             let state_var = StateVar {
@@ -141,7 +141,7 @@ fn parse_var(
                 default: expr_as_res(default_expr)?,
                 flag_pos: *flag_pos,
             };
-            script_data.state_vars.push(state_var);
+            script_data.derived_vars.push(state_var);
         }
         _ => {
             return Err(syn::Error::new(

@@ -5,7 +5,7 @@ use rsvelte::{compile, setup_dir};
 fn main() {
     let output_path = "output";
     env_logger::init();
-    let compile_out = compile("./+page.rsvelte").expect("Compilation failed");
+    let compile_out = compile("./test-prj1/src/+page.rsvelte").expect("Compilation failed");
 
     // Setup output directory
     //setup_dir(output_path).expect("Failed to setup output directory");

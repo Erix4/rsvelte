@@ -17,6 +17,7 @@ pub fn get_state_code_getter(
             }
         })
         .collect::<Vec<proc_macro2::TokenStream>>();
+    log::info!("Props: {:?}", props);
 
     let bindable_props = script_data
         .bindable_props
@@ -29,6 +30,7 @@ pub fn get_state_code_getter(
             }
         })
         .collect::<Vec<proc_macro2::TokenStream>>();
+    log::info!("Bindable props: {:?}", bindable_props);
 
     let state_vars = script_data
         .state_vars
@@ -41,6 +43,7 @@ pub fn get_state_code_getter(
             }
         })
         .collect::<Vec<proc_macro2::TokenStream>>();
+    log::info!("State vars: {:?}", state_vars);
 
     let derived_vars = script_data
         .derived_vars
@@ -53,6 +56,7 @@ pub fn get_state_code_getter(
             }
         })
         .collect::<Vec<proc_macro2::TokenStream>>();
+    log::info!("Derived vars: {:?}", derived_vars);
 
     let user_funcs = script_data.state_functions.clone();
     let init_body = if let Some(init_func) = &script_data.init_func {
@@ -142,9 +146,10 @@ fn get_state_constructor(script_data: &ScriptData) -> proc_macro2::TokenStream {
 
     let state_var_constructors = script_data.state_vars.iter().map(|var| {
         let name = &var.name;
+        let flag_pos: u32 = var.flag_pos as u32;
         let default_expr = &var.default;
         quote::quote! {
-            #name: crate::MutateTracker::new(#default_expr),
+            #name: crate::MutateTracker::new(#default_expr, #flag_pos),
         }
     });
 

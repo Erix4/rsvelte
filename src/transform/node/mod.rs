@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
-use quote::format_ident;
+use quote::{ToTokens, format_ident};
 use syn::Ident;
 
 mod attr;
+mod infer;
 mod utils;
 
 use crate::{
@@ -13,8 +14,8 @@ use crate::{
     },
     transform::{
         ReactiveVar,
-        expr::{infer_iter_item_type, transform_content_expr},
-        node::{attr::transform_attr, utils::*},
+        expr::transform_content_expr,
+        node::{attr::transform_attr, infer::infer_each_expr_type, utils::*},
     },
 };
 
@@ -252,13 +253,25 @@ impl Node {
                     flag_mask,
                 )
             }
-            ContentType::Each(iter_expr, item_name, children) => {
+            ContentType::Each(each_expr, item_name, children) => {
+                // TODO: get scoped vars
+                let inferred_expr_type =
+                    infer_each_expr_type(&each_expr, reactive_vars, &vec![]);
+                log::info!(
+                    "Inferred type of #each expression {} is {}",
+                    each_expr.to_token_stream().to_string(),
+                    inferred_expr_type.to_token_stream().to_string()
+                );
+                let (each_expr, item_type) = each_expr_to_vec_and_item_type(
+                    each_expr,
+                    inferred_expr_type,
+                );
                 let each_var = EachVar {
                     name: format_ident!("{}", item_name),
-                    ty: infer_iter_item_type(&iter_expr, reactive_vars),
+                    ty: item_type,
                 };
                 let (each_expr, flags) = transform_content_expr(
-                    iter_expr,
+                    each_expr,
                     state_vars,
                     reactive_vars,
                 );
@@ -341,5 +354,46 @@ impl Node {
             }
         }
         fields
+    }
+}
+
+/// Take an each expression and its inferred type (array, vec, or iterable),
+/// and convert the expression to be a vector and return the item type
+fn each_expr_to_vec_and_item_type(
+    each_expr: syn::Expr,
+    expr_type: syn::Type,
+) -> (syn::Expr, syn::Type) {
+    match &expr_type {
+        syn::Type::Array(array) => {
+            let item_type = *array.elem.clone();
+            let each_expr = syn::parse_quote! { #each_expr.to_vec() };
+            (each_expr, item_type)
+        }
+        syn::Type::Path(path) => {
+            // Check if iterator & collect if so
+            let last_segment = path.path.segments.last().unwrap();
+            if last_segment.ident == "Vec" {
+                let item_type = match &last_segment.arguments {
+                    syn::PathArguments::AngleBracketed(args) => {
+                        if let Some(syn::GenericArgument::Type(ty)) =
+                            args.args.first()
+                        {
+                            ty.clone()
+                        } else {
+                            panic!("Vec must have an element type");
+                        }
+                    }
+                    _ => panic!("Unsupported Vec type"),
+                };
+                (each_expr, item_type)
+            } else {
+                // Assume it's an iterable and call into_iter().collect()
+                let item_type =
+                    syn::parse_quote! { <#expr_type as IntoIterator>::Item };
+                let each_expr = syn::parse_quote! { (#each_expr).into_iter().collect::<Vec<_>>() };
+                (each_expr, item_type)
+            }
+        }
+        _ => panic!("Unsupported type for #each expression"),
     }
 }

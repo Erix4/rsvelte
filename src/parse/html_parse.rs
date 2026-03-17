@@ -231,7 +231,7 @@ fn read_contents(
                     // Expect format: {#each items as item} - each_str should be "items as item"
                     let parts: Vec<&str> =
                         each_str.split_whitespace().collect();
-                    if parts.len() != 4 || parts[1] != "as" {
+                    if parts.len() != 3 || parts[1] != "as" {
                         panic!(
                             "Invalid #each expression at line {}, col {}: expected format '{{#each items as item}}'",
                             coord.line, coord.col

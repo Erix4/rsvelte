@@ -156,16 +156,18 @@ fn get_run_code_from_attribute(
     match attr_val {
         AttrType::Closure(closure) => {
             let mut call_args = Vec::new();
-            if let Some(event_type) = &closure.event_arg {
+            let mut closure_args = Vec::new();
+            if let Some((arg_name, event_type)) = &closure.event_arg {
                 call_args.push(
                     quote::quote! { e.dyn_into::<#event_type>().unwrap() },
                 );
+                closure_args.push(quote::quote! { #arg_name });
             }
             let closure_body = &closure.body;
             // Both state and scope are captured by the closure,
             // so we can just call it directly here without passing them as arguments
             Some(quote::quote! {
-                (#closure_body)( #( #call_args ),* );
+                (| #( #closure_args),* | #closure_body)( #( #call_args ),* );
             })
         }
         AttrType::Call(func_name) => {
