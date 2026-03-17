@@ -1,4 +1,4 @@
-use crate::transform::ReactiveVar;
+use crate::transform::{ReactiveVar, node::EachVar};
 
 /// The kind of type of the expression
 pub enum ExprType {
@@ -18,7 +18,7 @@ pub enum ExprType {
 pub fn infer_each_expr_type(
     expr: &syn::Expr,
     reactive_vars: &[ReactiveVar],
-    scoped: &Vec<(&syn::Ident, &syn::Type)>,
+    scoped: &Vec<EachVar>,
 ) -> syn::Type {
     match expr {
         // Parenthesized expression: unwrap and recurse
@@ -89,9 +89,9 @@ pub fn infer_each_expr_type(
         syn::Expr::Path(path) => {
             if let Some(ident) = path.path.get_ident() {
                 // Check scoped vars first
-                for (name, ty) in scoped {
-                    if *name == ident {
-                        return (*ty).clone();
+                for var in scoped {
+                    if var.name == *ident {
+                        return (var.ty).clone();
                     }
                 }
                 // Check reactive vars
@@ -117,7 +117,7 @@ pub fn infer_each_expr_type(
 fn infer_scalar_type(
     expr: &syn::Expr,
     reactive_vars: &[ReactiveVar],
-    scoped: &Vec<(&syn::Ident, &syn::Type)>,
+    scoped: &Vec<EachVar>,
 ) -> syn::Type {
     match expr {
         syn::Expr::Lit(lit) => match &lit.lit {
@@ -142,9 +142,9 @@ fn infer_scalar_type(
         },
         syn::Expr::Path(path) => {
             if let Some(ident) = path.path.get_ident() {
-                for (name, ty) in scoped {
-                    if *name == ident {
-                        return (*ty).clone();
+                for var in scoped {
+                    if var.name == *ident {
+                        return (var.ty).clone();
                     }
                 }
                 for var in reactive_vars {

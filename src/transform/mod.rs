@@ -161,6 +161,7 @@ fn transform_component(
         &state_funcs,
         &component_map,
         &comp.id_hash,
+        &vec![],
     );
 
     // Build reactive var data & dependency graph for derived and bindables

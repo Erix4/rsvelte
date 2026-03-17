@@ -16,10 +16,16 @@
     </p>
     <p>Counter: {counter}</p>
     {#each 0..counter as i}
-        {#if i % 2 == 0}
-            <p>Even: {i}</p>
-        {:else}
-            <p>Odd: {i}</p>
-        {/if}
+        <div class="count-row">
+        {#each 0..*i as j}
+            <p>{i} {j}</p>
+        {/each}
+        </div>
     {/each}
 </div>
+
+<style>
+    .count-row {
+        display: flex;
+    }
+</style>

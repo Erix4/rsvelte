@@ -14,7 +14,7 @@ use crate::{
         proc_func::{
             get_proc_func_each, get_proc_func_if_branch, get_proc_func_root,
         },
-        scope::ScopeData,
+        scope::{self, ScopeData},
         unmount_func::get_unmount_func,
         update_func::{
             get_update_func_block, get_update_func_each, get_update_func_root,
@@ -278,7 +278,7 @@ fn get_each_block_fragment(
     let scope_type = scope.get_type();
     let wrapped_scope = scope.wrap(item_name.clone(), item_type.clone());
 
-    let generate_func = get_generate_func_each(mask, expr);
+    let generate_func = get_generate_func_each(mask, expr, scope);
     let new_func = get_new_func_each(nodes, &wrapped_scope);
     let mount_func = get_mount_func_block(nodes);
     let proc_func = get_proc_func_each(nodes, state_funcs, &wrapped_scope);
@@ -326,10 +326,20 @@ fn get_struct_declaration(
 fn get_generate_func_each(
     mask: u64,
     expr: &syn::Expr,
+    scope: &ScopeData,
 ) -> proc_macro2::TokenStream {
+    let scope_destructor = scope.get_destructor();
+
+    let flag_check = if mask != 0 {
+        quote::quote! { flags & #mask != 0 }
+    } else {
+        quote::quote! { flags == u64::MAX }
+    };
+
     quote::quote! {
         fn generate(state: &Self::State, scope: Self::Scope<'_>, flags: u64) -> Option<Vec<Self::Item>> {
-            if flags & #mask != 0 {
+            let #scope_destructor = scope;
+            if #flag_check {
                 Some(#expr)
             } else {
                 None

@@ -36,6 +36,7 @@ pub struct TagAttribute {
     pub flag_mask: Option<u64>, // Only set for reactive attributes
 }
 
+#[derive(Clone)]
 pub struct EachVar {
     pub name: Ident,
     pub ty: syn::Type,
@@ -115,6 +116,7 @@ impl Node {
         state_funcs: &Vec<&Ident>,
         component_map: &HashMap<&String, &ComponentAST>,
         comp_id_hash: &String,
+        scoped_vars: &Vec<EachVar>,
     ) -> Self {
         let frag_field_idx = *frag_field_idx_counter;
         *frag_field_idx_counter += 1;
@@ -172,6 +174,7 @@ impl Node {
                             state_funcs,
                             component_map,
                             comp_id_hash,
+                            scoped_vars,
                         )
                     })
                     .collect();
@@ -207,6 +210,7 @@ impl Node {
                                         state_funcs,
                                         component_map,
                                         comp_id_hash,
+                                        scoped_vars,
                                     )
                                 })
                                 .collect(),
@@ -235,6 +239,7 @@ impl Node {
                                     state_funcs,
                                     component_map,
                                     comp_id_hash,
+                                    scoped_vars,
                                 )
                             })
                             .collect(),
@@ -256,7 +261,7 @@ impl Node {
             ContentType::Each(each_expr, item_name, children) => {
                 // TODO: get scoped vars
                 let inferred_expr_type =
-                    infer_each_expr_type(&each_expr, reactive_vars, &vec![]);
+                    infer_each_expr_type(&each_expr, reactive_vars, scoped_vars);
                 log::info!(
                     "Inferred type of #each expression {} is {}",
                     each_expr.to_token_stream().to_string(),
@@ -275,7 +280,8 @@ impl Node {
                     state_vars,
                     reactive_vars,
                 );
-                // TODO: detect if expression is iterable or vector & convert to vector if needed
+                let mut scoped_vars = scoped_vars.clone();
+                scoped_vars.push(each_var.clone());
 
                 // Reset tuple index counter for each content so that it starts at 0 and doesn't include parent nodes
                 let mut each_frag_field_idx_counter = 0;
@@ -290,6 +296,7 @@ impl Node {
                             state_funcs,
                             component_map,
                             comp_id_hash,
+                            &scoped_vars,
                         )
                     })
                     .collect();
