@@ -1,12 +1,13 @@
 use quote::format_ident;
 use syn::Ident;
 
-use crate::transform::NodeIfBranch;
+use crate::{code_gen::scope::ScopeData, transform::NodeIfBranch};
 
 pub fn get_new_func_if(
     enum_name: &Ident,
     branches: &Vec<NodeIfBranch>,
     else_branch: Option<&Ident>,
+    scope: &ScopeData,
 ) -> proc_macro2::TokenStream {
     let mut if_branches = quote::quote! {};
     for (i, branch) in branches.iter().enumerate() {
@@ -26,8 +27,11 @@ pub fn get_new_func_if(
         { #enum_name::Else( #else_constructor ) }
     });
 
+    let scope_destructor = scope.get_destructor();
+
     quote::quote! {
         fn new(state: &Self::State, scope: Self::Scope<'_>, current_path: &Vec<u32>,) -> Result<Self, crate::JsValue> {
+            let #scope_destructor = scope;
             Ok(
                 #if_branches
             )
@@ -108,6 +112,7 @@ pub fn get_unmount_func_if(
 pub fn get_branch_changed_func_if(
     if_mask: u64,
     branches: &Vec<NodeIfBranch>,
+    scope: &ScopeData,
 ) -> proc_macro2::TokenStream {
     let mut match_arms = Vec::new();
     let mut else_condition = Vec::new();
@@ -124,8 +129,12 @@ pub fn get_branch_changed_func_if(
         Self::Else(_) if #(#else_condition)&&* => false,
     });
 
+    let scope_destructor = scope.get_destructor();
+
     quote::quote! {
         fn branch_changed(&self, state: &Self::State, scope: Self::Scope<'_>, flags: u64) -> bool {
+            let #scope_destructor = scope;
+            
             if flags & #if_mask != 0 {
                 match self {
                     #(#match_arms)*

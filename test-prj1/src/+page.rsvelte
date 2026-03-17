@@ -16,6 +16,10 @@
     </p>
     <p>Counter: {counter}</p>
     {#each 0..counter as i}
-        <p>Count: {i}</p>
+        {#if i % 2 == 0}
+            <p>Even: {i}</p>
+        {:else}
+            <p>Odd: {i}</p>
+        {/if}
     {/each}
 </div>

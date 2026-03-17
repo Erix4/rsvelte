@@ -48,7 +48,7 @@ fn get_update_func_ex(
 
     let update_code = nodes
         .iter()
-        .flat_map(|node| node.get_update_code(quote::quote! {update}))
+        .flat_map(|node| node.get_update_code(quote::quote! {parent}))
         .collect::<Vec<_>>();
 
     quote::quote! {

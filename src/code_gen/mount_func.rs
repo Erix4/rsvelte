@@ -84,13 +84,13 @@ impl Node {
             }
             NodeType::If(_, _, _, _) | NodeType::Each(_, _, _, _, _) => {
                 // Mounting of #if and #each fragments is done inside functions, so we just call those functions here
-                let add_method = if let Some(parent) = parent {
-                    quote::quote! { crate::child_append_closure(&self.#parent) }
+                let (add_method, parent) = if let Some(parent) = parent {
+                    (quote::quote! { crate::child_append_closure(&self.#parent) }, quote::quote! { &self.#parent })
                 } else {
-                    quote::quote! {quote::quote! { add_method } }
+                    (quote::quote! { add_method }, quote::quote! { parent })
                 };
                 quote::quote! {
-                    self.#struct_field.mount(&self.#parent, #add_method)?;
+                    self.#struct_field.mount(#parent, #add_method)?;
                 }
             }
             NodeType::Comp(_, _) => {

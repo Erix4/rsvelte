@@ -197,11 +197,12 @@ fn get_if_enum_fragment(
         quote::quote! {}
     };
 
-    let branch_changed_func = get_branch_changed_func_if(mask, branches);
+    let branch_changed_func = get_branch_changed_func_if(mask, branches, scope);
     let new_func = get_new_func_if(
         enum_name,
         branches,
         else_branch.as_ref().map(|b| &b.name),
+        scope
     );
     let mount_func = get_mount_func_if(branches.len(), else_branch.is_some());
     let proc_func = get_proc_func_if(branches.len(), else_branch.is_some());

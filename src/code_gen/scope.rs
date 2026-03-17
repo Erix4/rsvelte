@@ -21,6 +21,8 @@ impl ScopeData<'_> {
     }
 
     pub fn wrap(&self, name: syn::Ident, ty: syn::Type) -> ScopeData {
+        // Add reference to type
+        let ty = syn::parse_quote! { &'a #ty };
         ScopeData {
             name,
             ty,
