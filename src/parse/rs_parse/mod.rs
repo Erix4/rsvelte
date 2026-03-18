@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, path::PathBuf};
 use syn::{
     Ident, ItemFn, Token, parse::{Parse, ParseStream, Peek}
 };
@@ -6,7 +6,6 @@ use syn::{
 mod gen_vars;
 pub use gen_vars::{StateVar, Prop};
 use gen_vars::gen_vars;
-mod gen_funcs;
 mod gen_expr;
 pub use gen_expr::*;
 
@@ -17,7 +16,7 @@ pub fn parse_script(js: &str) -> Result<ScriptData, crate::CompileError> {
 
 pub struct ComponentImport {
     pub name: String,
-    pub path: String,
+    pub path: PathBuf,
 }
 
 #[derive(Default)]
@@ -95,10 +94,11 @@ impl Parse for ScriptData {
                 let import_path: syn::LitStr = input.parse()?;
                 let _: Token![;] = input.parse()?; // Consume ';' at end of import statement
 
+                let resolved_path = std::fs::canonicalize(&import_path.value()).unwrap();
 
                 script_data.imports.push(ComponentImport {
                     name: component_name.to_string(),
-                    path: import_path.value(),
+                    path: resolved_path,
                 });
             } else {
                 // Unrecognized item, consume it as tokens (includes comments)

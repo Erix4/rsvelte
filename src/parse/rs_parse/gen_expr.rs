@@ -9,7 +9,7 @@ pub struct AttrClosure {
 }
 
 pub fn parse_attr_expression(
-    expr: &String,
+    expr: &str,
     is_event: bool,
 ) -> syn::Result<AttrType> {
     let expr_chars = &mut expr.chars().peekable();
@@ -34,7 +34,6 @@ pub fn parse_attr_expression(
             .collect::<Vec<&str>>();
 
         for arg in closure_args_strs {
-            println!("Parsing closure argument: {}", arg);
             if let None = event_arg {
                 if !is_event {
                     return Err(syn::Error::new(
@@ -64,7 +63,6 @@ pub fn parse_attr_expression(
         }
 
         let remaining_expr: String = expr_chars.collect();
-        log::info!("Parsing closure body: {}", remaining_expr);
         let body_expr: syn::Expr = syn::parse_str(&remaining_expr)?;
 
         Ok(AttrType::Closure(AttrClosure {

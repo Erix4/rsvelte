@@ -19,6 +19,7 @@ pub fn get_all_components(
     path: &str,
 ) -> Result<Vec<ComponentAST>, CompileError> {
     let path = fs::canonicalize(path)?;
+    let starting_dir = env::current_dir()?;
 
     let mut components = Vec::new();
     let mut paths_to_process = vec![path];
@@ -29,23 +30,23 @@ pub fn get_all_components(
             continue;
         }
         seen_paths.insert(current_path.clone());
-
+        
+        env::set_current_dir(current_path.parent().unwrap())?;
         let component_ast = parse(current_path.clone())?;
 
         // Add imported components to paths_to_process
         if let Some(script) = &component_ast.script {
             for import in &script.imports {
                 // Check if the import path is absolute or relative
-                let resolved_path = resolve_path_location(
-                    &import.path,
-                    current_path.parent().unwrap(),
-                )?;
+                let resolved_path = fs::canonicalize(&import.path)?;
                 paths_to_process.push(resolved_path);
             }
         }
 
         components.push(component_ast);
     }
+
+    env::set_current_dir(starting_dir)?; // Reset to original directory
 
     Ok(components)
 }
@@ -156,24 +157,4 @@ fn read_parent_elem(
             chars, coord, id_counter, tag,
         )))
     }
-}
-
-fn resolve_path_location(
-    path_str: &str,
-    current_dir: &Path,
-) -> Result<PathBuf, CompileError> {
-    log::info!(
-        "Resolving path: '{}' relative to '{}'",
-        path_str,
-        current_dir.display()
-    );
-    // TODO: add library paths like $lib and $components
-    let path = std::path::Path::new(path_str);
-    log::info!("Parsed path: '{}'", path.display());
-    env::set_current_dir(current_dir)?;
-    log::info!(
-        "Changed current directory to '{}'",
-        env::current_dir()?.display()
-    );
-    Ok(fs::canonicalize(path)?)
 }

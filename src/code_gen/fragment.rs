@@ -211,7 +211,6 @@ fn get_if_enum_fragment(
         get_unmount_func_if(branches.len(), else_branch.is_some());
 
     quote::quote! {
-        #[derive(Clone)]
         pub enum #enum_name {
             #(#enum_branches),*,
             #else_enum_branch
@@ -316,7 +315,6 @@ fn get_struct_declaration(
         .collect::<Vec<_>>();
 
     quote::quote! {
-        #[derive(Clone)]
         pub struct #frag_name {
             #(#struct_field_declarations),*
         }

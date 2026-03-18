@@ -130,7 +130,7 @@ impl Node {
 
                 code.push(quote::quote! {
                     _ if target == #frag_field_idx => {
-                        self.#struct_field.proc(state, scope, e, target_path)?;
+                        self.#struct_field.proc(scope, e, target_path)?;
                         let child_bindable_flags = crate::DIRTY_FLAGS.load(std::sync::atomic::Ordering::SeqCst);
                         crate::DIRTY_FLAGS.store(0, std::sync::atomic::Ordering::SeqCst);
 

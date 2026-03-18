@@ -1,1 +1,19 @@
-<p>Hello world from Button!</p>
+<div>
+    <p>Hello world from Button!</p>
+    <button onclick={
+        || web_sys::console::log_1(&format!("Hello from button!").into())
+    }>Click me</button>
+</div>
+
+<style>
+    div {
+        background-color: lightgray;
+        border-radius: 5px;
+        padding: 10px;
+        width: fit-content;
+    }
+
+    p {
+        color: red;
+    }
+</style>

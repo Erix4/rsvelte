@@ -28,6 +28,10 @@
 </div>
 
 <style>
+    :global(p) {
+        margin: 0;
+    }
+    
     .count-row {
         display: flex;
     }

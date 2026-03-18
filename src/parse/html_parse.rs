@@ -53,64 +53,6 @@ pub struct Element {
     pub content: ContentType,
 }
 
-impl Element {
-    pub fn get_events(&self) -> Vec<(String, AttrType)> {
-        let all_attrs = self.get_all_attrs();
-        // Filter to only event attributes, and check that they are not strings
-        all_attrs
-            .iter()
-            .filter(|(name, _)| {
-                crate::EVENTS
-                    .iter()
-                    .any(|(event_name, _, _)| event_name == name)
-            })
-            .map(|(name, attr)| {
-                if let AttrType::Str(_) = attr {
-                    panic!(
-                        "Event attribute '{}' must be a function call or closure, found string",
-                        name
-                    );
-                }
-                (name.clone(), attr.clone())
-            })
-            .collect()
-    }
-
-    fn get_all_attrs(&self) -> Vec<(String, AttrType)> {
-        match &self.content {
-            ContentType::Tag(tag, contents) => {
-                let mut attrs = tag.attributes.clone();
-                for child in contents {
-                    attrs.extend(child.get_all_attrs());
-                }
-                attrs
-            }
-            ContentType::If(if_branches, else_branch) => {
-                let mut attrs = Vec::new();
-                for branch in if_branches {
-                    for elem in &branch.contents {
-                        attrs.extend(elem.get_all_attrs());
-                    }
-                }
-                if let Some(else_contents) = else_branch {
-                    for elem in else_contents {
-                        attrs.extend(elem.get_all_attrs());
-                    }
-                }
-                attrs
-            }
-            ContentType::Each(_, _, contents) => {
-                let mut attrs = Vec::new();
-                for elem in contents {
-                    attrs.extend(elem.get_all_attrs());
-                }
-                attrs
-            }
-            _ => Vec::new(),
-        }
-    }
-}
-
 pub fn read_element_with_tag(
     chars: &mut std::iter::Peekable<std::str::Chars>,
     coord: &mut Coord,
@@ -445,6 +387,7 @@ fn parse_attr(
             chars.next();
             let value = read_attr_expression(chars, coord);
             expect_next(chars, '}', coord);
+            let value = value.trim();
 
             if attr_name.starts_with("bind:") {
                 let name = attr_name.trim_start_matches("bind:").to_string();
@@ -457,7 +400,7 @@ fn parse_attr(
                 .iter()
                 .any(|(event_name, _, _)| event_name == &attr_name);
 
-            rs_parse::parse_attr_expression(&value, attr_is_event_type).expect(&format!(
+            rs_parse::parse_attr_expression(value, attr_is_event_type).expect(&format!(
                 "Failed to parse attribute expression for attribute '{}' at line {}, col {}",
                 attr_name, coord.line, coord.col
             ))

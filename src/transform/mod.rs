@@ -71,7 +71,6 @@ pub fn transform(
         }
         comp_contexts.push(transform_component(comp, &components)?);
     }
-    log::info!("Generated CSS rules: {:?}", css_rules);
 
     Ok(CodeGenContext {
         root_comp: root_context,
@@ -107,13 +106,8 @@ fn transform_component(
 ) -> Result<CompContext, CompileError> {
     // Check that event attributes have matching functions,
     // and collect event handlers
-    let html_events = comp.body.get_events();
     let script = if let Some(script) = comp.script {
         script
-    } else if !html_events.is_empty() {
-        return Err(generic_error(
-            "Event attributes found in HTML but no <script> section present",
-        ));
     } else {
         parse::ScriptData {
             props: Vec::new(),
@@ -227,7 +221,11 @@ pub fn gen_css_rules(
     css_rules
         .iter()
         .map(|rule| {
-            let selector = format!("{}.C{}", rule.selector, comp_id_hash);
+            let selector = if rule.is_global {
+                &rule.selector
+            } else {
+                &format!("{}.C{}", rule.selector, comp_id_hash)
+            };
             let mut rule_string = format!("{} {{\n", selector);
             for decl in &rule.declarations {
                 rule_string.push_str(&format!("  {}\n", decl));

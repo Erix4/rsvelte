@@ -36,9 +36,6 @@ impl<T> Deref for MutateTracker<T> {
 
 impl<T> DerefMut for MutateTracker<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        web_sys::console::log_1(
-            &format!("DerefMut called for id {}", self.id).into(),
-        );
         DIRTY_FLAGS.fetch_or(1 << self.id, std::sync::atomic::Ordering::SeqCst);
         &mut self.value
     }
@@ -50,7 +47,6 @@ trait ComponentState {
     fn update_derived(&mut self);
 }
 
-// TODO: rectify that this doesn't derive clone
 struct Component<T: RootFragment> {
     contents: T,
     state: T::State,
@@ -58,8 +54,6 @@ struct Component<T: RootFragment> {
 
 impl<T: RootFragment> Component<T> {
     fn new(current_path: &Vec<u32>) -> Result<Self, JsValue> {
-        web_sys::console::log_1(&"Initializing Page component".into());
-
         let state = T::State::new();
         let contents = T::new(&state, (), current_path)?;
         let mut new_page = Self { contents, state };
@@ -89,18 +83,10 @@ impl<T: RootFragment> Component<T> {
     /// and propagate any changes to children as needed.
     fn proc(
         &mut self,
+        _: (),
         e: web_sys::Event,
         target_path: Vec<u32>,
-        _: (),
     ) -> Result<(), JsValue> {
-        web_sys::console::log_1(
-            &format!(
-                "Processing event: {}, target path: {:?}",
-                e.type_(),
-                target_path
-            )
-            .into(),
-        );
         // Event handling
         self.contents.proc(&mut self.state, (), e, target_path)?;
 
@@ -192,19 +178,6 @@ struct IfElement<T: IfContentTrait> {
     pub comment: Comment,
     pub content_enum: T,
     current_path: Vec<u32>,
-}
-
-impl<T> Clone for IfElement<T>
-where
-    T: IfContentTrait + Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            comment: self.comment.clone(),
-            content_enum: self.content_enum.clone(),
-            current_path: self.current_path.clone(),
-        }
-    }
 }
 
 trait IfContentTrait {
@@ -313,7 +286,6 @@ impl<T: IfContentTrait> GenericFragment for IfElement<T> {
 
 /// Represents the content of an each block, which may have multiple instances
 /// Each instance is identified by a unique key produced by a hash function
-#[derive(Clone)]
 struct EachElement<T: EachContentTrait> {
     pub comment: web_sys::Comment,
     pub content: Vec<(u64, T, T::Item)>, // (hash, DOM ref, item)
@@ -362,7 +334,7 @@ trait EachContentTrait {
     fn unmount(&self);
 }
 
-impl<T: EachContentTrait + Clone> GenericFragment for EachElement<T> {
+impl<T: EachContentTrait> GenericFragment for EachElement<T> {
     type State = T::State;
     type Scope<'a> = T::Scope<'a>;
 
@@ -504,6 +476,10 @@ impl<T: EachContentTrait + Clone> GenericFragment for EachElement<T> {
                 .max_by_key(|sub| sub.len())
                 .unwrap_or_default();
 
+            let mut takeable_old_items: Vec<Option<(u64, T, T::Item)>> =
+                self.content.drain(..).map(Some).collect();
+
+            // Move & mount items into new list
             let mut new_list = Vec::new();
             for (new_index, source_index_opt) in
                 new_item_source_array.into_iter().enumerate()
@@ -511,28 +487,17 @@ impl<T: EachContentTrait + Clone> GenericFragment for EachElement<T> {
                 if let Some(source_index) = source_index_opt {
                     if !longest_sub.contains(&new_index) {
                         // Move existing item to correct position
-                        let new_item =
-                            takeable_new_items[new_index].take().unwrap();
-                        let contents = &self.content[source_index].1;
-                        contents.unmount();
-                        contents.mount(
+                        let old_item = takeable_old_items[source_index].take().unwrap();
+                        old_item.1.unmount();
+                        old_item.1.mount(
                             parent,
                             comment_insert_closure(&self.comment, parent),
                         )?;
-                        new_list.push((
-                            self.content[source_index].0,
-                            contents.clone(),
-                            new_item,
-                        ));
+                        new_list.push(old_item);
                     } else {
                         // Item is already in correct position, just update anchor for next iteration
-                        let new_item =
-                            takeable_new_items[new_index].take().unwrap();
-                        new_list.push((
-                            self.content[source_index].0,
-                            self.content[source_index].1.clone(),
-                            new_item,
-                        ));
+                        let old_item = takeable_old_items[source_index].take().unwrap();
+                        new_list.push(old_item);
                     }
                 } else {
                     // Mount new item
@@ -546,7 +511,7 @@ impl<T: EachContentTrait + Clone> GenericFragment for EachElement<T> {
                     )?;
                     new_list.push((
                         new_hashes[new_index],
-                        new_contents.clone(),
+                        new_contents,
                         new_item,
                     ));
                 }
@@ -665,7 +630,7 @@ thread_local! {
 
 #[wasm_bindgen]
 pub fn mount() -> Result<(), JsValue> {
-    web_sys::console::log_1(&"Mounting application".into());
+    web_sys::console::log_1(&"Mounting application...".into());
     PAGE.with(|page| {
         let window = web_sys::window().expect("no global window exists");
         let document = window.document().expect("no document on window");
@@ -684,7 +649,7 @@ pub fn handle_event(e: web_sys::Event, target: Vec<u32>) {
     let _ = PAGE.with(|page| {
         let page = &mut *page.borrow_mut();
         let page = page.as_mut().expect("Page component should be initialized");
-        page.proc(e, target, ())
+        page.proc((), e, target)
             .or_else(|e| {
                 web_sys::console::error_1(
                     &format!("Error processing event: {:?}", e).into(),

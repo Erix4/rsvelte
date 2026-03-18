@@ -1,6 +1,5 @@
 use crate::transform::{ReactiveVar, node::EachVar};
-use quote::ToTokens;
-use syn::{parse::Parser, visit_mut::VisitMut};
+use syn::visit_mut::VisitMut;
 
 /// Find all state variables in the expression, dereference them if necessary and add state accessor,
 /// and extract a bitmask of which variables are used.

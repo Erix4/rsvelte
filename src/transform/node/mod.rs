@@ -49,7 +49,7 @@ pub enum NodeType {
     Tag(String, Vec<TagAttribute>, Vec<Node>), // tag name, its attributes and its contents
     If(Vec<NodeIfBranch>, Option<NodeElseBranch>, Ident, u64), // if branches, else branch, enum name, expression dirty flag mask
     Each(syn::Expr, EachVar, Vec<Node>, Ident, u64), // iterable expression, item var, contents, fragment name, expression dirty flag mask
-    Comp(String, Vec<(TagAttribute, u64)>), // component name and its props & their child comp masks
+    Comp(Ident, Vec<(TagAttribute, u64)>), // component name and its props & their child comp masks
 }
 
 /// Represents a node in the transformed AST, which can be used for code generation.
@@ -138,7 +138,7 @@ impl Node {
                     // check if this is a valid component
                     if let Some(comp_ast) = component_map.get(&tag_name) {
                         // Get comp type from comp id hash
-                        let comp_name = format!("C{}", comp_ast.id_hash);
+                        let comp_name = format_ident!("C{}RootFrag", comp_ast.id_hash);
                         let attributes = if let Some(props) =
                             comp_ast.script.as_ref().map(|script| &script.props)
                         {

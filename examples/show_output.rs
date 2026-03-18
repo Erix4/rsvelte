@@ -4,7 +4,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use rsvelte::{compile, setup_dir};
+use rsvelte::{compile, setup_dir, setup_dir_force};
 
 fn main() {
     let output_path = "output";
