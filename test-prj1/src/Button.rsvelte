@@ -1,7 +1,13 @@
+<script>
+    struct $state {
+        n: i32 = $prop(),
+    }
+</script>
+
 <div>
     <p>Hello world from Button!</p>
     <button onclick={
-        || web_sys::console::log_1(&format!("Hello from button!").into())
+        || web_sys::console::log_1(&format!("Hello from button {}!", n).into())
     }>Click me</button>
 </div>
 

@@ -80,6 +80,20 @@ pub fn get_state_code_getter(
         #(#derived_vars)*
     };
 
+    let props_tuple = {
+        let prop_types = script_data.props.iter().map(|prop|
+            if prop.default.is_some() {
+                // Props with provided expressions are optional
+                let ty = &prop.ty;
+                quote::quote! { Option<#ty> }
+            } else {
+                let ty = &prop.ty;
+                quote::quote! { #ty }
+            }
+        );
+        quote::quote! { (#(#prop_types ,)*) }
+    };
+
     let closure = move |state_type: &Ident| {
         quote::quote! {
             pub struct #state_type {
@@ -87,11 +101,13 @@ pub fn get_state_code_getter(
             }
 
             impl crate::ComponentState for #state_type {
+                type Props = #props_tuple;
+
                 fn init(&mut self) {
                     #init_body
                 }
 
-                fn new() -> Self {
+                fn new(props: Self::Props) -> Self {
                     Self {
                         #constructor
                     }
@@ -112,16 +128,19 @@ pub fn get_state_code_getter(
 }
 
 fn get_state_constructor(script_data: &ScriptData) -> proc_macro2::TokenStream {
-    let prop_constructors = script_data.props.iter().map(|prop| {
+    let prop_constructors = script_data.props.iter().enumerate().map(|(tuple_idx, prop)| {
         let name = &prop.name;
+        let tuple_idx: syn::Index = syn::Index::from(tuple_idx);
         if let Some(default) = &prop.default {
+            // This is an optional prop, so use the default value if the prop is not provided
             let default_expr = &default;
             quote::quote! {
-                #name: #default_expr,
+                #name: props.#tuple_idx.unwrap_or(#default_expr),
             }
         } else {
+            // This is a required prop, so just use the value from props
             quote::quote! {
-                #name: Default::default(),
+                #name: props.#tuple_idx,
             }
         }
     });

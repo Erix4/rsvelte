@@ -52,6 +52,7 @@ pub fn code_gen(
     // Generate state.rs as tokens (to ensure valid syntax)
     let state_rs_tokens = quote::quote! {
         use crate::GenericFragment;
+        use crate::ComponentStateExt;
         use wasm_bindgen::JsCast;
 
         #fragment_code

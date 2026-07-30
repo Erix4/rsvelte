@@ -49,7 +49,7 @@ pub enum NodeType {
     Tag(String, Vec<TagAttribute>, Vec<Node>), // tag name, its attributes and its contents
     If(Vec<NodeIfBranch>, Option<NodeElseBranch>, Ident, u64), // if branches, else branch, enum name, expression dirty flag mask
     Each(syn::Expr, EachVar, Vec<Node>, Ident, u64), // iterable expression, item var, contents, fragment name, expression dirty flag mask
-    Comp(Ident, Vec<(TagAttribute, u64)>), // component name and its props & their child comp masks
+    Comp(Ident, Vec<(TagAttribute, u64)>, Vec<syn::Expr>), // component name and its props & their child comp masks, props
 }
 
 /// Represents a node in the transformed AST, which can be used for code generation.
@@ -125,46 +125,112 @@ impl Node {
         let content = match value.content {
             ContentType::Text(txt) => NodeType::Text(txt),
             ContentType::Expr(expr) => {
-                let (expr, flag_mask) =
-                    transform_content_expr(expr, state_vars, reactive_vars, scoped_vars);
+                log::info!("transforming expression for text node");
+                let (expr, flag_mask) = transform_content_expr(
+                    expr,
+                    state_vars,
+                    reactive_vars,
+                    scoped_vars,
+                );
                 NodeType::Expr(expr, flag_mask)
             }
             ContentType::Tag(tag, children) => {
                 // TODO: handle binds here
                 let (tag_name, attributes): (String, Vec<TagAttribute>) =
-                    transform_attr(tag, state_vars, reactive_vars, state_funcs, scoped_vars);
-                let attributes = add_css_scope_to_class_attr(attributes, comp_id_hash);
+                    transform_attr(
+                        tag,
+                        state_vars,
+                        reactive_vars,
+                        state_funcs,
+                        scoped_vars,
+                    );
                 if tag_name.starts_with(char::is_uppercase) {
                     // check if this is a valid component
                     if let Some(comp_ast) = component_map.get(&tag_name) {
                         // Get comp type from comp id hash
-                        let comp_name = format_ident!("C{}RootFrag", comp_ast.id_hash);
-                        let attributes = if let Some(props) =
+                        let comp_name =
+                            format_ident!("C{}RootFrag", comp_ast.id_hash);
+                        let (attributes, prop_inits) = if let Some(props) =
                             comp_ast.script.as_ref().map(|script| &script.props)
                         {
+                            let mut prop_inits = Vec::new();
+                            for prop in props {
+                                let optional = prop.default.is_some();
+
+                                let prop_name_as_str = &prop.name.to_string();
+                                let prop_attr_opt =
+                                    &attributes.iter().find(|attr| {
+                                        &attr.name == prop_name_as_str
+                                    });
+
+                                if let Some(prop_attr) = prop_attr_opt {
+                                    let prop_expr = match &prop_attr.value {
+                                        AttrType::Str(s) => syn::parse(
+                                            quote::quote! { #s }.into(),
+                                        )
+                                        .unwrap(),
+                                        AttrType::Expr(expr) => expr.clone(),
+                                        _ => panic!(
+                                            "Unsupported prop attribute type"
+                                        ),
+                                    };
+                                    if optional {
+                                        // Optional prop provided, so use the provided value
+                                        let prop_expr = quote::quote! {
+                                            Some(#prop_expr)
+                                        };
+                                        let prop_expr = syn::parse(prop_expr.into()).unwrap();
+                                        prop_inits.push(prop_expr);
+                                    } else {
+                                        // Required prop provided, so just use the provided value
+                                        prop_inits.push(prop_expr);
+                                    }
+                                } else if !optional {
+                                    panic!(
+                                        "Missing required prop {} for component {}",
+                                        prop.name, tag_name
+                                    );
+                                } else {
+                                    // Optional prop not provided, pass None and let the component use the default value
+                                    prop_inits.push(syn::parse(quote::quote! { None }.into()).unwrap());
+                                    continue;
+                                }
+                            }
+
                             let mut new_attributes = Vec::new();
                             for attr in attributes {
-                                let child_flag_mask = props
+                                log::info!(
+                                    "Processing attribute {} for component {}",
+                                    attr.name,
+                                    tag_name
+                                );
+                                let child_flag_mask: u64 = props
                                         .iter()
                                         .find(|prop| prop.name == attr.name)
                                         .map(|prop| 1 << prop.flag_pos).expect("Component props must be defined in the component script");
 
                                 new_attributes.push((attr, child_flag_mask));
                             }
-                            new_attributes
+
+                            (new_attributes, prop_inits)
                         } else {
-                            Vec::new()
+                            (Vec::new(), Vec::new())
                         };
+
                         return Node {
                             id: value.id,
                             frag_field_idx,
                             struct_field,
-                            content: NodeType::Comp(comp_name, attributes),
+                            content: NodeType::Comp(
+                                comp_name, attributes, prop_inits,
+                            ),
                         };
                     } else {
                         panic!("Component {} not found in imports", tag_name);
                     }
                 }
+                let attributes =
+                    add_css_scope_to_class_attr(attributes, comp_id_hash);
                 let child_nodes = children
                     .into_iter()
                     .map(|child| {
@@ -263,8 +329,11 @@ impl Node {
             }
             ContentType::Each(each_expr, item_name, children) => {
                 // TODO: get scoped vars
-                let inferred_expr_type =
-                    infer_each_expr_type(&each_expr, reactive_vars, scoped_vars);
+                let inferred_expr_type = infer_each_expr_type(
+                    &each_expr,
+                    reactive_vars,
+                    scoped_vars,
+                );
                 log::info!(
                     "Inferred type of #each expression {} is {}",
                     each_expr.to_token_stream().to_string(),
@@ -343,7 +412,7 @@ impl Node {
             NodeType::Each(_, _, _, frag_name, _) => {
                 types.push(quote::quote! { crate::EachElement<#frag_name> });
             }
-            NodeType::Comp(comp_name, _) => {
+            NodeType::Comp(comp_name, _, _) => {
                 types.push(quote::quote! { crate::Component<#comp_name> });
             }
         }
@@ -410,7 +479,10 @@ fn each_expr_to_vec_and_item_type(
     }
 }
 
-fn add_css_scope_to_class_attr(attributes: Vec<TagAttribute>, scope_id: &String) -> Vec<TagAttribute> {
+fn add_css_scope_to_class_attr(
+    attributes: Vec<TagAttribute>,
+    scope_id: &String,
+) -> Vec<TagAttribute> {
     let mut new_attributes = Vec::new();
     let scope_class = format!("C{}", scope_id);
     let mut has_class_attr = false;

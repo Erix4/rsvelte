@@ -1,4 +1,4 @@
-use syn::ItemFn;
+use syn::{ItemFn, token::At};
 
 use crate::{
     EVENTS,
@@ -114,23 +114,25 @@ impl Node {
                     }
                 });
             }
-            NodeType::Comp(_, props) => {
+            NodeType::Comp(_, props, _) => {
                 // Proc child components, then update bindable props
                 let struct_field = &self.struct_field;
                 let mut bindable_updates = Vec::new();
                 for (prop, child_mask) in props {
-                    let prop_name = &prop.name;
-                    bindable_updates.push(quote::quote! {
-                        if child_bindable_flags & #child_mask != 0 {
-                            *state.#prop_name = self.#struct_field.state.#prop_name;
-                            // The mutate tracker will mark this dirty automatically
-                        }
-                    });
+                    if let AttrType::Bind(var_name) = &prop.value {
+                    let prop_name: syn::Ident = syn::parse_str(&prop.name).unwrap();
+                        bindable_updates.push(quote::quote! {
+                            if child_bindable_flags & #child_mask != 0 {
+                                *state.#var_name = self.#struct_field.state.#prop_name;
+                                // The mutate tracker will mark this dirty automatically
+                            }
+                        });
+                    }
                 }
 
                 code.push(quote::quote! {
                     _ if target == #frag_field_idx => {
-                        self.#struct_field.proc(scope, e, target_path)?;
+                        self.#struct_field.proc((), e, target_path)?;
                         let child_bindable_flags = crate::DIRTY_FLAGS.load(std::sync::atomic::Ordering::SeqCst);
                         crate::DIRTY_FLAGS.store(0, std::sync::atomic::Ordering::SeqCst);
 

@@ -9,7 +9,7 @@ use crate::parse::ScriptData;
 
 #[derive(Clone)]
 pub struct Prop {
-    pub name: String,
+    pub name: syn::Ident,
     pub ty: syn::Type,
     pub default: Option<syn::Expr>,
     pub flag_pos: u8,
@@ -109,7 +109,7 @@ fn parse_var(
     match var_type_ident.to_string().as_str() {
         "prop" => {
             let prop = Prop {
-                name: name.to_string(),
+                name,
                 ty: ty,
                 default: default_expr,
                 flag_pos: *flag_pos,
@@ -118,7 +118,7 @@ fn parse_var(
         }
         "bindable" => {
             let prop = Prop {
-                name: name.to_string(),
+                name,
                 ty: ty,
                 default: default_expr,
                 flag_pos: *flag_pos,

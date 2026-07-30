@@ -41,7 +41,7 @@ impl Into<ReactiveVar> for parse::StateVar {
 impl Into<ReactiveVar> for parse::Prop {
     fn into(self) -> ReactiveVar {
         ReactiveVar {
-            name: syn::Ident::new(&self.name, proc_macro2::Span::call_site()),
+            name: self.name,
             ty: self.ty,
             flag_mask: 1 << self.flag_pos,
         }
@@ -132,6 +132,8 @@ fn transform_component(
         .chain(script.bindable_props.iter().cloned().map(Into::into))
         .chain(script.derived_vars.iter().cloned().map(Into::into))
         .collect();
+
+    log::info!("Reactive vars: {:?}", reactive_vars.iter().map(|v| &v.name).collect::<Vec<&Ident>>());
 
     // Create map from component imports to their ASTs for easy lookup during transformation
     let mut component_map = HashMap::new();

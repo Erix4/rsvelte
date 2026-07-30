@@ -128,10 +128,23 @@ impl Node {
                     let #struct_field = crate::EachElement::new(state, scope, current_path)?;
                 }
             }
-            NodeType::Comp(comp_name, _) => {
+            NodeType::Comp(comp_name, _, prop_inits) => {
                 let frag_field_idx = self.frag_field_idx as u32;
+                let prop_inits = prop_inits.iter().map(|init| {
+                    let (expr, _) =
+                        crate::transform::expr::transform_content_expr(
+                            init.clone(),
+                            state_vars,
+                            reactive_vars,
+                            scope_vars,
+                        );
+                    expr
+                });
                 quote::quote! {
-                    let #struct_field = crate::Component::<#comp_name>::new(&crate::prepend_path(current_path, #frag_field_idx))?;
+                    let #struct_field = crate::Component::<#comp_name>::new(
+                        <#comp_name as crate::RootFragment>::State::startup(#props_code),
+                        &crate::prepend_path(current_path, #frag_field_idx)
+                    )?;
                 }
                 // Downward state propagation is done after creation in the apply() function
             }

@@ -20,7 +20,7 @@ impl Node {
         match &self.content {
             NodeType::If(_, _, _, _)
             | NodeType::Each(_, _, _, _, _)
-            | NodeType::Comp(_, _) => {
+            | NodeType::Comp(_, _, _) => {
                 // Unmounting of #if and #each fragments is done inside functions, so we just call those functions here
                 // Note that unmount functions do not return a result
                 quote::quote! {

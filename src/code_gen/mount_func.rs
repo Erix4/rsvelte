@@ -93,11 +93,11 @@ impl Node {
                     self.#struct_field.mount(#parent, #add_method)?;
                 }
             }
-            NodeType::Comp(_, _) => {
+            NodeType::Comp(_, _, _) => {
                 let add_method = if let Some(parent) = parent {
                     quote::quote! { crate::child_append_closure(&self.#parent) }
                 } else {
-                    quote::quote! {quote::quote! { add_method } }
+                    quote::quote! { add_method }
                 };
                 quote::quote! {
                     self.#struct_field.mount(#add_method)?;

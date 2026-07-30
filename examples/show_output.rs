@@ -4,6 +4,7 @@ use std::{
     process::{Command, Stdio},
 };
 
+use log::{Level, log_enabled};
 use rsvelte::{compile, setup_dir, setup_dir_force};
 
 fn main() {
@@ -34,15 +35,21 @@ fn main() {
         eprintln!("rustfmt failed");
     }
 
-    let compile_status = Command::new("cargo")
+    let mut binding = Command::new("cargo");
+    let compile_status = binding
         .arg("build")
         // ignore unused warnings
         .env("RUSTFLAGS", "-Awarnings")
-        .current_dir(format!("./{}", output_path))
-        //.stdout(Stdio::null())
-        //.stderr(Stdio::null())
-        .status()
-        .expect("Failed to execute cargo build");
+        .current_dir(format!("./{}", output_path));
+
+    let compile_status = if log_enabled!(Level::Debug) {
+        compile_status
+    } else {
+        compile_status.stdout(Stdio::null())
+    }
+    .status()
+    .expect("Failed to execute cargo build");
+
     if !compile_status.success() {
         eprintln!("cargo build failed");
     }

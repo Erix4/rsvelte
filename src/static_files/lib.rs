@@ -42,9 +42,24 @@ impl<T> DerefMut for MutateTracker<T> {
 }
 
 trait ComponentState {
-    fn new() -> Self;
+    type Props;
+
+    fn new(props: Self::Props) -> Self;
     fn init(&mut self);
     fn update_derived(&mut self);
+}
+
+trait ComponentStateExt: ComponentState {
+    fn startup(props: Self::Props) -> Self;
+}
+
+impl<T: ComponentState> ComponentStateExt for T {
+    fn startup(props: Self::Props) -> Self {
+        let mut state = Self::new(props);
+        state.init();
+        state.update_derived();
+        state
+    }
 }
 
 struct Component<T: RootFragment> {
@@ -53,8 +68,7 @@ struct Component<T: RootFragment> {
 }
 
 impl<T: RootFragment> Component<T> {
-    fn new(current_path: &Vec<u32>) -> Result<Self, JsValue> {
-        let state = T::State::new();
+    fn new(state: T::State, current_path: &Vec<u32>) -> Result<Self, JsValue> {
         let contents = T::new(&state, (), current_path)?;
         let mut new_page = Self { contents, state };
 
@@ -111,6 +125,10 @@ impl<T: RootFragment> Component<T> {
         DIRTY_FLAGS.store(flag_snapshot, SeqCst);
 
         Ok(())
+    }
+
+    fn unmount(&self) {
+        self.contents.unmount();
     }
 }
 
@@ -636,7 +654,8 @@ pub fn mount() -> Result<(), JsValue> {
         let document = window.document().expect("no document on window");
         let body = document.body().expect("document should have a body");
 
-        let new_page = Component::<CPageRootFrag>::new(&vec![])?;
+        let state = <CPageRootFrag as RootFragment>::State::startup(());
+        let new_page = Component::<CPageRootFrag>::new(state, &vec![])?;
         new_page.mount(child_append_closure(&body))?;
         *page.borrow_mut() = Some(new_page);
         web_sys::console::log_1(&"Page component mounted".into());

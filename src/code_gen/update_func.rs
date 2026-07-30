@@ -113,7 +113,7 @@ impl Node {
                     self.#struct_field.update(#parent, state, scope, flags)?;
                 });
             }
-            NodeType::Comp(_, props) => {
+            NodeType::Comp(_, props, _) => {
                 let mut all_comp_flags = 0;
 
                 let mut prop_setters = Vec::new();
@@ -121,10 +121,10 @@ impl Node {
                     if let Some(flag_mask) = prop.flag_mask
                         && let AttrType::Expr(expr) = &prop.value
                     {
-                        let prop_name = &prop.name;
+                        let prop_name: syn::Ident = syn::parse_str(&prop.name).unwrap();
                         prop_setters.push(quote::quote! {
                             if flags & #flag_mask != 0 {
-                                self.#struct_field.#prop_name = #expr;
+                                self.#struct_field.state.#prop_name = #expr;
                                 crate::DIRTY_FLAGS.fetch_or(#child_comp_mask, std::sync::atomic::Ordering::SeqCst);
                             }
                         });

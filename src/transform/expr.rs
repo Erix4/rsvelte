@@ -1,5 +1,13 @@
 use crate::transform::{ReactiveVar, node::EachVar};
+use quote::ToTokens;
 use syn::visit_mut::VisitMut;
+
+struct VarVisitor<'a> {
+    state_vars: &'a Vec<ReactiveVar>,
+    reactive_vars: &'a Vec<ReactiveVar>,
+    scoped: &'a Vec<EachVar>,
+    flags: u64,
+}
 
 /// Find all state variables in the expression, dereference them if necessary and add state accessor,
 /// and extract a bitmask of which variables are used.
@@ -8,7 +16,7 @@ use syn::visit_mut::VisitMut;
 /// would become: `*state.counter`, but {my_struct.a} would be `state.my_struct.a`.
 /// There's no need to dereference if the state variable is already being accessed with dot notation.
 /// Deferences are only needed on $state variables, as all others have manually set flags.
-/// 
+///
 /// In addition to state variables, scoped variables also need to be adjusted, not to
 /// dereference them but to replace them with their modified identifiers (modified to avoid
 /// collisions with non-user code). This is done via similar logic to state variables.
@@ -19,19 +27,26 @@ pub fn transform_content_expr(
     scoped: &Vec<EachVar>,
 ) -> (syn::Expr, u64) {
     // Use a visitor to traverse the expression AST
-    struct VarVisitor<'a> {
-        state_vars: &'a Vec<ReactiveVar>,
-        reactive_vars: &'a Vec<ReactiveVar>,
-        scoped: &'a Vec<EachVar>,
-        flags: u64,
-    }
-
     impl<'a, 'ast> syn::visit_mut::VisitMut for VarVisitor<'a> {
         fn visit_expr_mut(&mut self, expr: &mut syn::Expr) {
+            log::info!(
+                "Visiting expression {}",
+                expr.to_token_stream().to_string()
+            );
             if let syn::Expr::Path(path) = expr.clone() {
+                log::info!(
+                    "Found path expression {} segments long",
+                    path.path.segments.len()
+                );
                 if path.path.segments.len() == 1 {
                     let ident = &path.path.segments[0].ident;
+                    log::info!("checking for {}", ident);
                     for var in self.reactive_vars.iter() {
+                        log::info!(
+                            "checking reactive var {} against {}",
+                            var.name,
+                            ident
+                        );
                         if var.name == *ident {
                             // Found a state variable, set the corresponding flag
                             self.flags |= var.flag_mask;
@@ -70,6 +85,15 @@ pub fn transform_content_expr(
             }
             syn::visit_mut::visit_expr_mut(self, expr);
         }
+
+        fn visit_macro_mut(&mut self, i: &mut syn::Macro) {
+            // Doesn't traverse by default, override
+            log::info!("Visiting macro {}", i.to_token_stream().to_string());
+
+            // Manually visit the tokens of the macro, as they may contain expressions that need to be transformed
+            let new_tokens = transform_token_stream(i.tokens.clone(), self);
+            i.tokens = new_tokens;
+        }
     }
 
     let mut visitor = VarVisitor {
@@ -82,6 +106,57 @@ pub fn transform_content_expr(
     visitor.visit_expr_mut(&mut expr);
 
     (expr, visitor.flags)
+}
+
+fn transform_token_stream(
+    tokens: proc_macro2::TokenStream,
+    visitor: &mut VarVisitor,
+) -> proc_macro2::TokenStream {
+    let mut new_tokens = proc_macro2::TokenStream::new();
+    for token in tokens {
+        match token {
+            proc_macro2::TokenTree::Group(group) => {
+                let new_group = proc_macro2::Group::new(
+                    group.delimiter(),
+                    transform_token_stream(group.stream(), visitor),
+                );
+                new_tokens.extend(std::iter::once(
+                    proc_macro2::TokenTree::Group(new_group),
+                ));
+            }
+            proc_macro2::TokenTree::Punct(punct) => {
+                new_tokens.extend(std::iter::once(
+                    proc_macro2::TokenTree::Punct(punct),
+                ));
+            }
+            proc_macro2::TokenTree::Literal(literal) => {
+                new_tokens.extend(std::iter::once(
+                    proc_macro2::TokenTree::Literal(literal),
+                ));
+            }
+            proc_macro2::TokenTree::Ident(ident) => {
+                // Check if the identifier is a reactive variable and replace it with state access if so
+                let ident_str = ident.to_string();
+                let mut replaced = false;
+                for var in visitor.reactive_vars.iter() {
+                    if var.name == ident_str {
+                        // Found a reactive variable, replace with state access
+                        new_tokens.extend(quote::quote! {
+                            state.#ident
+                        });
+                        replaced = true;
+                        break;
+                    }
+                }
+                if !replaced {
+                    new_tokens.extend(std::iter::once(
+                        proc_macro2::TokenTree::Ident(ident),
+                    ));
+                }
+            }
+        }
+    }
+    new_tokens
 }
 
 /// Similar to transform_content_expr, but also keep list of which reactive variables are used

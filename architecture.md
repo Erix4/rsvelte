@@ -2,7 +2,7 @@
 
 ## Reactivity Model
 
-RSvelte's reactivity model closely follows Svelte's, where state changes are entirely dependent on user events. When an element with an event listener (like `onclick={my_function}`) is mounted, an event listened is added which points to the top layer of the site's event handling tree: `handle_event`. From here, the event is propagated down, through the component tree, until it reaches the component with the element that has the event listener. This propagation is all done through the `proc()` function of each component. Once the element is found, the state-mutated user code is run.
+RSvelte's reactivity model closely follows Svelte's, where state changes are entirely dependent on user events. When an element with an event listener (like `onclick={my_function}`) is mounted, an event listener is added which points to the top layer of the site's event handling tree: `handle_event`. From here, the event is propagated down, through the component tree, until it reaches the component with the element that has the event listener. This propagation is all done through the `proc()` function of each component. Once the element is found, the state-mutated user code is run.
 
 Mutations in RSvelte are tracked, like Svelte, through the use of mutation flags in a global atomic `DIRTY_FLAGS` variable. Unlike Svelte, which identifies all user mutations of state and replaces them with getter and setter functions, RSvelte does not try to find all the ways in which you might mutate your state. Instead, it relies on Rust's built in dereferencing inference, which can automatically determine which variables need to be dereferenced mutably. All user settable state variables (which means `$props and $derived` are not included) are wrapped in a `MutationTracker<T>` struct, which implements `Deref` and `DerefMut` traits. When a variable is dereferenced mutably, the `DerefMut` implementation sets the corresponding mutation flag in `DIRTY_FLAGS`. This allows us to track mutations without needing to rewrite user code (apart from dereferencing where necessary), and also allows us to detect possible mutations if a mutable reference to state is passed into a function.
 
@@ -43,11 +43,56 @@ User clicks <button onclick={increment}>
                 └────────────────┘      └─────────────────┘
 ```
 
+### State and Fragment Scope
+
+Fragments can access three classes of data in their functions:
+
+  1. DOM elements - stored in the fragment's struct, created in `new()`
+  2. State - user defined, stored in component struct, passed down through function arguments
+  3. Scope - compiler generated, constructed during fragment traversal, passed down through function arguments
+
+State and Scope may seem similar, but there are a number of fundamental differences.
+
+State is the expression of Rsvelte's reactivity system, explicitly defined by the user and tracked for changes. When State is changed, various mechanisms are triggered to update the DOM based on this change. Scope is created in two cases: `#each` blocks and snippets.
+`#each` blocks, like for loops, expose the relative item at each iteration, while snippets expose any passed in arguments. Unlike State, Scope _cannot_ be changed; it is passed as immutable references to child fragments.
+
+Another difference is that the State type remains the same across the entire component, with the same mutable reference passed to each child fragment. The Scope type often changes between fragments, building with each `#each` block or snippet.
+
+Here is an code example with what their State and Scope would be inside the tag:
+
+```rsvelte
+<script>
+  struct $state {
+    let count: usize = $state(0);
+  }
+</script>
+
+<div>                                   <-- State: $state, Scope: ()
+  <#each (0..count) as i>               <-- State: $state, Scope: ((), &usize)
+    {@render snippet(i as i32)}         <-- State: $state, Scope: ((), &i32)
+
+    <#snippet snippet2(text: String)>   <-- State: $state, Scope: (((), &i32), &String)
+      <p>{text}</p>                          
+    </snippet>
+  </each>
+
+  <#snippet snippet(i: i32)>            <-- State: $state, Scope: ((), &i32)
+    <p>{i}</p>                          
+  </snippet>
+</div>
+```
+
+One interesting thing you'll notice in this example, is that Scope in snippets builds on the defining scope, not the rendering scope. This is because snippets capture the State and Scope at their definition, rather than using the State and Scope in their `{@render}` block. This allows snippets to be passed between components without any problems. The only way to pass local scope or state to a snippet is using the snippet's arguments, which are always strongly typed like regular functions.
+
 ### Diffing an #each block
 
 RSvelte, like Svelte, applies a diffing algorithm to arrays (or in RSvelte's case, any iterable) used in #each blocks to minimize the amount of DOM manipulation necessary. Whereas Svelte uses a user-specified key to identify unique items for more complex data types, RSvelte attempts to hash the items. This means any iterable's items must implement the `Hash` trait to be used in an #each block (which most simple types are by default). For most other types, it is easy to `#[derive(Hash)]` to add support, or, if you want more fine grained control, add a custom `Hash` implementation which only hashes the fields you want to use for comparison.
 
-Once hashes are obtained for all items, RSvelte builds a map of sources at each index of the new iterable (with None for new items), unmounting any items that are no longer present. The source map is only built for the "middle batch", which is the group of items with the first and last increasing subsequence removed. From the middle batch, we also finds the longest increasing subsequence (LIS), which is the longest sequence of items that are in the same order in both the old and new iterables. Items in the LIS do not need to be moved, but all others in the middle batch will be unmounted and re-mounted according to the source map. Items outside of the middle batch likewise are not moved.
+Once hashes are obtained for all items, RSvelte builds a map of sources at each index of the new iterable (with None for new items), unmounting any items that are no longer present. The source map is only built for the "middle batch", which is the group of items with the first and last increasing subsequence removed. From the middle batch, we also find the longest increasing subsequence (LIS), which is the longest sequence of items that are in the same order in both the old and new iterables. Items in the LIS do not need to be moved, but all others in the middle batch will be unmounted and re-mounted according to the source map. Items outside of the middle batch likewise are not moved.
+
+### Re-using fragment logic
+
+Each fragment type except the root (`#each`, `#if`, and `#snippet`) holds generic functionality. To encode the functionality without expanding the size of the generated Rust code (and to reduce compiler times), the generic functionality is stored in the `lib.rs` file with `IfElement`, `EachElement`, and `SnippetElement` structs. The structs are generic over an internal fragment which carries the actual information about the DOM structure and reactivity. The internal fragment must implement the trait corresponding to the fragment...
 
 ### Code generation structure
 
@@ -84,7 +129,7 @@ When this stage is completed, we have a tree of `Node`s which are able to direct
 
 Here, we also link the components together through their nested `proc()` functions, which directs user interactions to the listening event handler, propagates state changes (downward through `props` and upwards through `bindables` and callbacks), and applies the corresponding DOM updates to affected elements.
 
-One tricky detail is that elements in #if and #each blocks need two things to be inserted into the DOM: it's parent node (aka the tag which is lives inside, which is not related to the fragment it's in), and the comment anchor (used to mark the position at which the element should be inserted). These things are pulled from two different trees, both of which are pulled out of the AST. While these trees are not explicitly built into a data structure, they emerge from the pattern of recursion and DOM construction.
+One tricky detail is that elements in #if and #each blocks need two things to be inserted into the DOM: it's parent node (aka the tag which it lives inside, which is not related to the fragment it's in), and the comment anchor (used to mark the position at which the element should be inserted). These things are pulled from two different trees, both of which are pulled out of the AST. While these trees are not explicitly built into a data structure, they emerge from the pattern of recursion and DOM construction.
 
 The DOM tree completely ignores all #if and #each blocks, and several layers of nested blocks can all have the same parent and only be differentiated by their anchor. On the other hand, the fragment tree groups together all elements (parent and child) except for fragments. This is necessary to allow dynamic mounting, unmounting, and swapping of the internal elements. Inside fragments, all elements are once again grouped together, apart from other child fragments. Because the fragment structure is different from the DOM structure, and the parent node is required to mount new elements, parent nodes are passed down as arguments through the tree of fragment functions. Also passed down are scoped variables, aka the variables introduced in #each blocks which are dynamically generated based on a user expression.
 
