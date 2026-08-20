@@ -1,6 +1,12 @@
-use std::fmt::Debug;
+use std::{default, fmt::Debug};
 
-use crate::{EVENTS, parse::rs_parse, utils::*};
+use syn::parse_str;
+
+use crate::{
+    EVENTS,
+    parse::{self, rs_parse},
+    utils::*,
+};
 
 pub struct IfBranch {
     pub condition: syn::Expr,
@@ -13,6 +19,8 @@ pub enum ContentType {
     Tag(Tag, Vec<Element>), // tag and its contents
     If(Vec<IfBranch>, Option<Vec<Element>>), // if branches, else branch
     Each(syn::Expr, String, Vec<Element>), // iterable expression, item name, contents
+    SnippetDef(String, Vec<parse::Prop>, Vec<Element>), // snippet name, props, contents
+    SnippetRender(String, Vec<syn::Expr>), // snippet name, prop expressions
 }
 
 impl Debug for ContentType {
@@ -42,6 +50,12 @@ impl Debug for ContentType {
                     "Each {{ for {} in ? {{ {:?} }} }}",
                     item_name, contents
                 )
+            }
+            ContentType::SnippetDef(snippet_name, _, _) => {
+                write!(f, "Def snippet {}()", snippet_name)
+            }
+            ContentType::SnippetRender(snippet_name, _) => {
+                write!(f, "@render {}()", snippet_name)
             }
         }
     }
@@ -86,6 +100,7 @@ enum ReadContentExitReason {
     Else,              // Found an else branch
     IfClose,           // Found the closing tag for an if block
     EachClose,         // Found the closing tag for an each block
+    SnippetDefClose,   // Found the closing tag for a snippet definition
     End,               // Reached the end of input
 }
 
@@ -104,13 +119,42 @@ fn read_contents(
     while let Some(&ch) = chars.peek() {
         match ch {
             '<' => {
-                let next_tag = read_tag(chars, coord);
+                let next_tag = read_tag(chars, coord).unwrap();
                 match next_tag {
                     TagType::Opening(next_tag) => {
                         let elem = read_element_with_tag(
                             chars, coord, id_counter, next_tag,
                         );
                         elems.push(elem);
+                    }
+                    TagType::SnippetDef(name, props) => {
+                        let snippet_tag = Tag {
+                            name: "snippet".to_string(),
+                            attributes: Vec::new(),
+                            self_closing: false,
+                        };
+                        let Element { id, content } = read_element_with_tag(
+                            chars,
+                            coord,
+                            id_counter,
+                            snippet_tag,
+                        );
+
+                        let content =
+                            if let ContentType::Tag(_, contents) = content {
+                                contents
+                            } else {
+                                panic!("got non-tag type from read content")
+                            };
+
+                        let snippet_def =
+                            ContentType::SnippetDef(name, props, content);
+
+                        elems.push(Element {
+                            id: *id_counter,
+                            content: snippet_def,
+                        });
+                        *id_counter += 1;
                     }
                     TagType::Closing(name) => {
                         return (
@@ -210,6 +254,12 @@ fn read_contents(
                     return (elems, ReadContentExitReason::IfClose);
                 } else if expr_content.starts_with("/each") {
                     return (elems, ReadContentExitReason::EachClose);
+                } else if expr_content.starts_with("#snippet") {
+                    // Snippet defintion
+                } else if expr_content.starts_with("@render") {
+                    // Snippet rendering
+                } else if expr_content.starts_with("/snippet") {
+                    //
                 } else {
                     // Just a normal expression in text content
                     let expr =
@@ -309,22 +359,29 @@ impl Debug for Tag {
     }
 }
 
+struct SnippetDefProp {
+    pub name: syn::Ident,
+    pub ty: syn::Type,
+    pub default: Option<syn::Expr>,
+}
+
 pub enum TagType {
     Opening(Tag),
+    SnippetDef(String, Vec<SnippetDefProp>),
     Closing(String),
 }
 
 pub fn read_tag(
     chars: &mut std::iter::Peekable<std::str::Chars>,
     coord: &mut Coord,
-) -> TagType {
+) -> CompileResult<TagType> {
     expect_next(chars, '<', coord);
     if chars.peek() == Some(&'/') {
         chars.next();
         let name =
             read_until(chars, |ch| ch.is_whitespace() || ch == '>', coord);
         expect_next(chars, '>', coord);
-        return TagType::Closing(name);
+        return Ok(TagType::Closing(name));
     }
 
     let name = read_until(
@@ -332,6 +389,62 @@ pub fn read_tag(
         |ch| ch.is_whitespace() || ch == '/' || ch == '>',
         coord,
     );
+
+    if name == "#snippet" {
+        // This is a snippet definition, not a normal tag (i.e. `<#snippet my_snip(var: u64 = 0)>`)
+        read_until(chars, |ch| !ch.is_whitespace(), coord);
+
+        let name = read_until(chars, |ch| ch == '(', coord);
+        expect_next(chars, '(', coord);
+
+        let mut props = Vec::new();
+        loop {
+            read_until(chars, |ch| !ch.is_whitespace(), coord);
+            let cur_arg =
+                read_until(chars, |ch| ch.is_whitespace() || ch == ':', coord);
+            let cur_arg: syn::Ident = parse_str(&cur_arg)?;
+            read_until(chars, |ch| !ch.is_whitespace(), coord);
+            expect_next(chars, ':', coord);
+            let ty =
+                read_until(chars, |ch| ch.is_whitespace() || ch == '=', coord);
+            let ty: syn::Type = parse_str(&ty)?;
+
+            read_until(chars, |ch| !ch.is_whitespace(), coord);
+
+            let mut default = None;
+            if chars.peek() == Some(&'=') {
+                expect_next(chars, '=', coord);
+                read_until(chars, |ch| !ch.is_whitespace(), coord);
+                let expr = read_until(
+                    chars,
+                    |ch| ch.is_whitespace() || ch == ',' || ch == ')',
+                    coord,
+                );
+                let expr = parse_str(&expr)?;
+
+                default = Some(expr);
+            }
+
+            let prop = SnippetDefProp {
+                name: cur_arg,
+                ty,
+                default,
+            };
+
+            props.push(prop);
+
+            read_until(chars, |ch| !ch.is_whitespace(), coord);
+
+            if chars.peek() == Some(&')') {
+                break;
+            }
+
+            expect_next(chars, ',', coord);
+        }
+
+        return Ok(TagType::SnippetDef(name, props));
+    }
+
     let mut attributes = Vec::new();
 
     loop {
@@ -363,11 +476,11 @@ pub fn read_tag(
     };
     expect_next(chars, '>', coord);
 
-    TagType::Opening(Tag {
+    Ok(TagType::Opening(Tag {
         name,
         attributes,
         self_closing,
-    })
+    }))
 }
 
 fn parse_attr(

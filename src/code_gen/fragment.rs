@@ -14,7 +14,7 @@ use crate::{
         proc_func::{
             get_proc_func_each, get_proc_func_if_branch, get_proc_func_root,
         },
-        scope::{self, ScopeData},
+        scope::ScopeData,
         unmount_func::get_unmount_func,
         update_func::{
             get_update_func_block, get_update_func_each, get_update_func_root,
@@ -202,7 +202,7 @@ fn get_if_enum_fragment(
         enum_name,
         branches,
         else_branch.as_ref().map(|b| &b.name),
-        scope
+        scope,
     );
     let mount_func = get_mount_func_if(branches.len(), else_branch.is_some());
     let proc_func = get_proc_func_if(branches.len(), else_branch.is_some());

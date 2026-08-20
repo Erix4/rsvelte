@@ -138,11 +138,9 @@ fn transform_component(
     // Create map from component imports to their ASTs for easy lookup during transformation
     let mut component_map = HashMap::new();
     for comp in components {
-        if let Some(import) = script
-            .imports
-            .iter()
-            .find(|import| import.path == comp.source_path)
-        {
+        if let Some(import) = script.imports.iter().find(|import| {
+            import.path == comp.source_path.as_os_str().to_str().unwrap()
+        }) {
             component_map.insert(&import.name, comp);
         } else {
             return Err(generic_error(&format!(

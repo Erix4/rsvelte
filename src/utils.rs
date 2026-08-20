@@ -26,7 +26,11 @@ where
 }
 
 /// Reads characters until the target string is found (target is included)
-pub fn read_until_string(chars: &mut std::iter::Peekable<std::str::Chars>, target: &str, coord: &mut Coord) -> String {
+pub fn read_until_string(
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+    target: &str,
+    coord: &mut Coord,
+) -> String {
     let mut result = String::new();
     let target_len = target.len();
     let mut buffer = String::new();
@@ -48,7 +52,7 @@ pub fn read_until_string(chars: &mut std::iter::Peekable<std::str::Chars>, targe
             buffer.remove(0);
         }
     }
-    
+
     result
 }
 
@@ -81,8 +85,14 @@ pub fn expect_next(
     }
 }
 
+pub type CompileResult<T> = Result<T, CompileError>;
+
 pub enum CompileError {
-    LocError { line: usize, col: usize, message: String },
+    LocError {
+        line: usize,
+        col: usize,
+        message: String,
+    },
     GenericError(String),
 }
 
